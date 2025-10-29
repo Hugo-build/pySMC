@@ -193,7 +193,7 @@ MIT License
 
 ## Authors
 
-- yuma
+- Hugo
 
 ## Contributing
 
