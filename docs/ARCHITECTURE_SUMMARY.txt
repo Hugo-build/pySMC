@@ -1,0 +1,132 @@
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║           pySMC Surrogate Framework Architecture                         ║
+╔══════════════════════════════════════════════════════════════════════════╗
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  DESIGN PRINCIPLE: Universal Adapter Framework                          │
+│  - Surrogates.py is an ADAPTER, not an implementation                   │
+│  - GP.py stays INDEPENDENT and FUNCTIONAL                               │
+│  - Easy to plug in ANY model type                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  LAYER 1: Base Interface (Universal)                                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    ┌───────────────────────┐
+    │   BaseSurrogate       │  ← Abstract interface for ALL models
+    │      (ABC)            │
+    ├───────────────────────┤
+    │ + fit(X, y)          │
+    │ + predict(X_star)    │
+    │ + is_fitted()        │
+    │ + validate_inputs()  │
+    └───────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  LAYER 2: Adaptive Extensions                                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    ┌───────────────────────────────┐
+    │   AdaptiveSurrogate           │  ← Adds adaptive sampling
+    │   (extends BaseSurrogate)     │
+    ├───────────────────────────────┤
+    │ + suggest_next_sample()       │  ← Intelligent sampling
+    │ + add_sample()                │  ← Incremental updates
+    │ + get_training_data()         │
+    └───────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  LAYER 3: Acquisition Functions (Where to sample?)                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    ┌────────────────────────┬────────────────────────┬──────────────────┐
+    │  VarianceReduction     │ ExpectedImprovement    │    UCB           │
+    ├────────────────────────┼────────────────────────┼──────────────────┤
+    │  Explore uncertain     │  Balance explore/      │  Optimistic      │
+    │  regions               │  exploit               │  exploration     │
+    │  (space-filling)       │  (optimization)        │  (controlled)    │
+    └────────────────────────┴────────────────────────┴──────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  LAYER 4: Model Adapters (Wraps concrete implementations)              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    ┌──────────────────────────┐
+    │  GaussianProcessAdapter  │ ──wraps──► GP.py (your JAX GP)
+    ├──────────────────────────┤
+    │  • Auto hyperparameter   │
+    │    initialization        │
+    │  • Multiple kernels      │
+    │  • Optimization          │
+    └──────────────────────────┘
+
+    ┌──────────────────────────┐
+    │  PolynomialAdapter       │ ──future──► Polynomial regression
+    └──────────────────────────┘
+
+    ┌──────────────────────────┐
+    │  NeuralNetworkAdapter    │ ──future──► Neural network
+    └──────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  LAYER 5: Adaptive Implementations                                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    ┌───────────────────────────┐
+    │  AdaptiveGaussianProcess  │ = GaussianProcessAdapter
+    ├───────────────────────────┤   + Adaptive sampling
+    │  ✓ Adaptive kriging       │
+    │  ✓ Active learning        │
+    │  ✓ Bayesian optimization  │
+    └───────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════
+
+KEY BENEFITS:
+
+  ✅ GP.py stays INDEPENDENT  → Can use it standalone
+  ✅ ADAPTER pattern          → Easy to add new models
+  ✅ ADAPTIVE methods         → Built-in intelligent sampling
+  ✅ MODULAR design           → Mix and match components
+  ✅ JAX-powered              → Fast, differentiable
+  ✅ EXTENSIBLE               → Add features without breaking code
+
+═══════════════════════════════════════════════════════════════════════════
+
+USAGE EXAMPLES:
+
+1. Basic GP Surrogate:
+   surrogate = GaussianProcessAdapter.create(kernel_type='matern52')
+   surrogate = surrogate.fit(X, y, optimize_hyperparameters=True)
+   mean, std = surrogate.predict(X_test)
+
+2. Adaptive Kriging:
+   agp = AdaptiveGaussianProcess.create(kernel_type='rbf')
+   agp = agp.fit(X_init, y_init)
+   
+   for i in range(n_iterations):
+       X_next = agp.suggest_next_sample(X_candidates, 
+                                        acquisition=VarianceReduction())
+       y_next = expensive_function(X_next)
+       agp = agp.add_sample(X_next, y_next, refit=True)
+
+3. Bayesian Optimization:
+   agp = AdaptiveGaussianProcess.create()
+   agp = agp.fit(X_init, y_init)
+   
+   X_next = agp.suggest_next_sample(X_candidates,
+                                    acquisition=ExpectedImprovement())
+
+═══════════════════════════════════════════════════════════════════════════
+
+FILES CREATED:
+
+  📁 core/Surrogates.py              → Universal framework
+  📁 core/GP.py                      → Your GP (untouched, independent)
+  📁 test_surrogate_framework.py    → Comprehensive tests
+  📁 SURROGATE_DESIGN.md            → Detailed documentation
+  📁 ARCHITECTURE_SUMMARY.txt       → This file
+
+═══════════════════════════════════════════════════════════════════════════
