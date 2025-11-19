@@ -7,6 +7,11 @@ This demonstrates:
 3. Comparison with JAX GP implementation (see test_sobol_simple.py)
 """
 
+import sys
+from pathlib import Path
+# Add parent directory to path for imports when running from examples/ folder
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from pprint import pprint
@@ -97,7 +102,7 @@ y = np.array([f(x)["y"] for x in X])
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=123)
 
-print("================================================")
+print("=================================================================================================================")
 print("Results with sklearn RBF kernel (default optimization):")
 
 # sklearn GP with RBF kernel
@@ -120,10 +125,10 @@ y_pred_rbf, y_std_rbf = gp_rbf.predict(X_test, return_std=True)
 plot_results(y_test, y_pred_rbf, y_std_rbf)
 metrics_rbf = print_metrics(y_test, y_pred_rbf, y_std_rbf)
 print(f"Optimized kernel: {gp_rbf.kernel_}")
-print("================================================")
+print("================================================================================================================")
 
 
-print("\n================================================")
+print("\n==============================================================================================================")
 print("Results with sklearn Matern kernel (default optimization):")
 
 # sklearn GP with Matern kernel
@@ -146,5 +151,5 @@ y_pred_matern, y_std_matern = gp_matern.predict(X_test, return_std=True)
 plot_results(y_test, y_pred_matern, y_std_matern)
 metrics_matern = print_metrics(y_test, y_pred_matern, y_std_matern)
 print(f"Optimized kernel: {gp_matern.kernel_}")
-print("================================================")
+print("=================================================================================================================")
 

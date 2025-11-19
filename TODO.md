@@ -9,3 +9,7 @@
 ### Modifying terms
 - [] the structure for variables, fitting to the existing "UQpy" and "SALib"
 - [] wrap over to the required style of jsons of UQpy and SALib
+
+### LLM-MCP terms
+- [V] test selecting path and agent perform in the path
+- [V] test save config and reload
