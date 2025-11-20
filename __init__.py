@@ -77,12 +77,6 @@ from .core.Aquiz import (
     UpperConfidenceBound,
 )
 
-# Monte Carlo simulation
-from .core.MonteCarlo import (
-    MCResult,
-    run_monte_carlo,
-)
-
 # Safe expression evaluation
 from .core.SafeEval import evaluate_expression
 
