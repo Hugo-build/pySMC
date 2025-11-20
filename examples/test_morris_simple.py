@@ -99,8 +99,8 @@ y = np.array([f(x)["y"] for x in X])
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=123)
 
-kernel = RBF(log_sf=jnp.log(jnp.std(y_train) + 1e-6), log_ls=jnp.log(jnp.ones((n_dim,)) * 0.1))
-gp = GaussianProcess(kernel=kernel, log_sn2=jnp.log(jnp.array(0.1**2)), jitter=1e-6)
+kernel = RBF.from_params(signal_std=float(jnp.std(y_train)), length_scale=jnp.ones(n_dim) * 0.1)
+gp = GaussianProcess.from_params(kernel=kernel, noise_std=0.1, jitter=1e-6)
 
 # Capture the returned fitted GP (immutable dataclass pattern)
 gp_fitted = gp.fit(jnp.array(X_train), jnp.array(y_train), opt_config=None)

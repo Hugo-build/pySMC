@@ -10,6 +10,7 @@ Test scripts that validate specific functionality:
 - **test_sobol_simple.py**: Sobol G-function test with JAX GP
 - **test_sobol_simple_sklearn.py**: Sobol G-function test with scikit-learn GP
 - **test_sobolG_verbose.py**: Verbose Sobol G-function test with kernel comparisons
+- **test_surrogate_framework.py**: Comprehensive test of the Surrogate framework (SurrogatePipe, SurrogatePool, adaptive learning utilities)
 - **test_parametric_variables.py**: Tests for ParametricVariable and ConfigMapper
 - **test_variable_targets.py**: Tests for Variable.targets functionality
 - **test_fe_direct.py**: Direct test of FE detection functions

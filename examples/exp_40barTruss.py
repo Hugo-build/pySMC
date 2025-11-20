@@ -612,8 +612,11 @@ opt_config = optSetup(
 )
 
 # Train a surrogate model on SCALED data
-kernel = RBF(log_sf=jnp.log(jnp.std(y_train_scaled) + 1e-6), log_ls=jnp.log(jnp.ones((X_train_scaled.shape[1],)) * 0.1))
-gp = GaussianProcess(kernel=kernel, log_sn2=jnp.log(jnp.array(0.1**2)), jitter=1e-6)
+kernel = RBF.from_params(
+    signal_std=float(jnp.std(y_train_scaled)),
+    length_scale=jnp.ones(X_train_scaled.shape[1]) * 0.1
+)
+gp = GaussianProcess.from_params(kernel=kernel, noise_std=0.1, jitter=1e-6)
 gp_fitted = gp.fit(X_train_scaled, y_train_scaled, opt_config=opt_config)
 
 # Predict using the fitted GP on SCALED test data
