@@ -52,12 +52,18 @@ Optional dev dependencies:
 
 ## Quick Start
 
+> **Note**: pySMC now supports clean imports directly from the main package! 
+> See [IMPORT_GUIDE.md](IMPORT_GUIDE.md) for detailed information about the new import structure.
+
 ### Basic Gaussian Process Surrogate
 
 ```python
-from core.GPax import GaussianProcess, RBF, optSetup
-from core.Variables import VariableSet, Variable
-from core.Samplers import sample_inputs
+# New clean imports from main package!
+from pySMC import (
+    GaussianProcess, RBF, optSetup,
+    VariableSet, Variable,
+    sample_inputs
+)
 import jax.numpy as jnp
 
 # Define variables
@@ -70,7 +76,7 @@ vset = VariableSet([
 X_train = sample_inputs(vset, 100, kind="lhs", seed=42)
 y_train = your_function(X_train)  # Your function here
 
-# Create GP with sklearn-style interface (new!)
+# Create GP with sklearn-style interface
 kernel = RBF.from_params(
     signal_std=1.0,
     length_scale=jnp.ones(2) * 0.1
@@ -91,15 +97,18 @@ y_pred, y_std = gp_fitted.predict(jnp.array(X_test))
 
 
 
-### Surrogate pipeline
+### Surrogate Pipeline
 
 The `SurrogatePipe` provides a higher-level abstraction with automatic data preprocessing:
 
 ```python
-from core.Surrogates import SurrogatePipe, StandardScaler
-from core.GPax import GaussianProcess, RBF, optSetup
-from core.Variables import VariableSet, Variable
-from core.Samplers import sample_inputs
+# New clean imports!
+from pySMC import (
+    SurrogatePipe, StandardScaler,
+    GaussianProcess, RBF, optSetup,
+    VariableSet, Variable,
+    sample_inputs
+)
 import jax.numpy as jnp
 
 # Define variables and generate data
@@ -147,11 +156,12 @@ y_pred, y_std = predict_fn(X_test)  # Input/output in original scale
 Update surrogates with new data using adaptive weighting strategies:
 
 ```python
-from core.Surrogates import (
+# New clean imports!
+from pySMC import (
     SurrogatePipe, SurrogatePool, StandardScaler,
-    calc_upd_weight, combine_weighted_data
+    calc_upd_weight, combine_weighted_data,
+    SizeNoveltyWeight
 )
-from core.Weighted import SizeNoveltyWeight
 
 # ... (assuming you have pipe, X_train, y_train from previous example)
 
@@ -322,6 +332,30 @@ MIT License
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Import Structure
+
+pySMC now provides a clean, intuitive API. You can import everything directly from the main package:
+
+```python
+# Recommended: Direct imports from main package
+from pySMC import (
+    GaussianProcess, RBF,
+    Variable, VariableSet,
+    sample_inputs,
+    SurrogatePipe,
+)
+```
+
+The old import style still works for backward compatibility:
+
+```python
+# Legacy style (still works)
+from pySMC.core.GPax import GaussianProcess, RBF
+from pySMC.core.Variables import Variable, VariableSet
+```
+
+For more details, see [IMPORT_GUIDE.md](IMPORT_GUIDE.md).
 
 ## TODO
 
