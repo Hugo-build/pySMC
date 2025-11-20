@@ -89,23 +89,132 @@ X_test = sample_inputs(vset, 50, kind="sobol", seed=123)
 y_pred, y_std = gp_fitted.predict(jnp.array(X_test))
 ```
 
-### Adaptive Surrogate Modeling
 
+
+### Surrogate pipeline
+
+The `SurrogatePipe` provides a higher-level abstraction with automatic data preprocessing:
+
+```python
+from core.Surrogates import SurrogatePipe, StandardScaler
+from core.GPax import GaussianProcess, RBF, optSetup
+from core.Variables import VariableSet, Variable
+from core.Samplers import sample_inputs
+import jax.numpy as jnp
+
+# Define variables and generate data
+vset = VariableSet([
+    Variable(name="x1", kind="uniform", params={"low": 0.0, "high": 1.0}),
+    Variable(name="x2", kind="uniform", params={"low": 0.0, "high": 1.0})
+])
+X_train = sample_inputs(vset, 100, kind="lhs", seed=42)
+y_train = your_function(X_train)
+
+# Create and fit scalers
+x_scaler = StandardScaler()
+y_scaler = StandardScaler()
+x_scaler.fit(X_train)
+y_scaler.fit(y_train.reshape(-1, 1))
+
+# Scale training data
+X_train_scaled = x_scaler.transform(X_train)
+y_train_scaled = y_scaler.transform(y_train.reshape(-1, 1)).flatten()
+
+# Fit GP on scaled data
+kernel = RBF.from_params(signal_std=1.0, length_scale=jnp.ones(2) * 0.2)
+gp = GaussianProcess.from_params(kernel=kernel, noise_std=0.1)
+opt_config = optSetup(optimizer='adam', steps=100, lr=0.02, verbose=True)
+gp_fitted = gp.fit(jnp.array(X_train_scaled), jnp.array(y_train_scaled), opt_config=opt_config)
+
+# Create surrogate pipe (handles scaling automatically)
+pipe = SurrogatePipe(
+    model=gp_fitted,
+    varSet=vset,
+    X=X_train,        # Original unscaled data
+    y=y_train,        # Original unscaled data
+    x_scaler=x_scaler,
+    y_scaler=y_scaler
+)
+
+# Predict with automatic scaling/unscaling
+predict_fn = pipe.make_predict_fn() # functional method
+X_test = sample_inputs(vset, 50, kind="sobol", seed=123)
+y_pred, y_std = predict_fn(X_test)  # Input/output in original scale
 ```
-Wait to be accomplished
+
+### Updatable Surrogate Modeling
+
+Update surrogates with new data using adaptive weighting strategies:
+
+```python
+from core.Surrogates import (
+    SurrogatePipe, SurrogatePool, StandardScaler,
+    calc_upd_weight, combine_weighted_data
+)
+from core.Weighted import SizeNoveltyWeight
+
+# ... (assuming you have pipe, X_train, y_train from previous example)
+
+# Generate new data (e.g., from adaptive sampling or new experiments)
+X_new = sample_inputs(vset, 200, kind="lhs", seed=999)
+y_new = your_function(X_new) # use your function of evaluation, getting corresponding y values.
+
+# Calculate adaptive weight based on novelty and size
+predict_fn = pipe.make_predict_fn()
+weight = calc_upd_weight(
+    X_old=X_train,
+    y_old=y_train,
+    X_new=X_new,
+    y_new=y_new,
+    predict_fn=predict_fn,
+    strategy=SizeNoveltyWeight(novelty_power=0.5),
+    verbose=True
+)
+
+# Combine datasets using weighted sampling
+X_combined, y_combined = combine_weighted_data(
+    X_old=X_train,
+    y_old=y_train,
+    X_new=X_new,
+    y_new=y_new,
+    weight=weight,
+    random_state=42,
+    verbose=True
+)
+
+# Fit new scalers and GP on combined data
+x_scaler_new = StandardScaler().fit(X_combined)
+y_scaler_new = StandardScaler().fit(y_combined.reshape(-1, 1))
+X_combined_scaled = x_scaler_new.transform(X_combined)
+y_combined_scaled = y_scaler_new.transform(y_combined.reshape(-1, 1)).flatten()
+
+gp_updated = GaussianProcess.from_params(kernel=kernel, noise_std=0.1)
+gp_updated_fitted = gp_updated.fit(
+    jnp.array(X_combined_scaled), 
+    jnp.array(y_combined_scaled), 
+    opt_config=opt_config
+)
+
+# Create updated surrogate pipe
+pipe_updated = SurrogatePipe(
+    model=gp_updated_fitted,
+    varSet=vset,
+    X=X_combined,
+    y=y_combined,
+    x_scaler=x_scaler_new,
+    y_scaler=y_scaler_new
+)
+
+# Manage multiple surrogates with SurrogatePool
+pool = SurrogatePool(surrogates=[pipe, pipe_updated])
+latest_surrogate = pool.get(-1)  # Get most recent surrogate
+y_pred_updated, y_std_updated = latest_surrogate.make_predict_fn()(X_test)
 ```
 
 ### Monte Carlo Simulation via CLI
 
 ```bash
-# List available case studies
-python -m cli.main list-cases
-
-# Run a case study
-python -m cli.main run <case-name> --n 1000 --sampler sobol
-
-# Run from config file
-python -m cli.main run-config config.json --out results.csv
+Wait to be accomplished
 ```
 
 ## Project Structure
@@ -119,64 +228,63 @@ pySMC/
 │   ├── DoEs.py       # Design of Experiments
 │   ├── Variables.py  # Variable definitions
 │   ├── MonteCarlo.py # Monte Carlo simulation
-│   └── DataWash.py   # Data preprocessing
-├── templates/         # Case study templates
+│   ├── DataWash.py   # Data preprocessing
+│   ├── Weighted.py   # Adaptive weighting strategies
+│   └── Aquiz.py      # Acquisition functions
+├── examples/         # Example scripts and case studies
 ├── cli/              # Command-line interface
 ├── io/               # Input/output utilities
-└── docs/             # Documentation
+└── FElib.py          # Finite element library
 ```
 
 ## Key Components
 
 ### Surrogate Modeling Framework
 
-The `Surrogates.py` module provides a universal adapter framework:
+The `Surrogates.py` module provides a universal surrogate pipeline framework:
 
-- **BaseSurrogate**: Abstract interface for all surrogate models
-- **AdaptiveSurrogate**: Adds adaptive sampling capabilities
-- **Acquisition Functions**: VarianceReduction, ExpectedImprovement, UCB
-- **Model Adapters**: GaussianProcessAdapter, (future: Polynomial, NeuralNetwork)
-
-See `docs/SURROGATE_DESIGN.md` for detailed architecture documentation.
+- **SurrogatePipe**: Main surrogate model pipeline with automatic scaling and preprocessing
+- **SurrogatePool**: Manages multiple surrogate models for ensemble and version tracking
+- **StandardScaler**: Data normalization for inputs and outputs
+- **Adaptive Learning Utilities**: `calc_upd_weight`, `combine_weighted_data` for updating surrogates
+- **Type Conversion**: Seamless numpy/JAX interoperability with `to_numpy`
 
 ### Gaussian Process Implementation
 
 The `GPax.py` module provides a pure JAX implementation:
 
-- Multiple kernel types: RBF, Matern32, Matern52
-- sklearn-style parameter interface (new!)
-- Hyperparameter optimization with Optax
-- Efficient prediction with uncertainty quantification
-- Functional, immutable design
-
-**Documentation:**
-- 📘 [sklearn-Style API Guide](docs/SKLEARN_STYLE_PARAMS.md) - New parameter interface
-- 📘 [GP Improvements](docs/GP_IMPROVEMENTS.md) - Technical improvements
-- 📘 [Optimizer Guide](docs/OPTIMIZER_GUIDE.md) - Hyperparameter optimization
+- **Multiple kernel types**: RBF, Matern32, Matern52
+- **sklearn-style parameter interface**: Direct parameter specification (no manual log transforms)
+- **Hyperparameter optimization**: Integrated Optax optimizers (Adam, SGD, etc.)
+- **Uncertainty quantification**: Efficient prediction with mean and standard deviation
+- **Functional, immutable design**: All operations create new instances (frozen dataclasses)
 
 ### Sampling Strategies
 
 Available samplers in `Samplers.py`:
 
-- `random`: Uniform random sampling
-- `lhs`: Latin Hypercube Sampling
-- `sobol`: Sobol sequences (quasi-random)
+- **`random`**: Uniform random sampling
+- **`lhs`**: Latin Hypercube Sampling (space-filling design)
+- **`sobol`**: Sobol sequences (quasi-random, low-discrepancy)
+
+### Weighting Strategies
+
+Available weighting strategies in `Weighted.py`:
+
+- **`SizeNoveltyWeight`**: Balances old and new data based on dataset size and prediction novelty
 
 ## Examples
 
-See the following example scripts:
+See the `examples/` directory for complete example scripts:
 
-- `test_sobol_simple.py` - Sobol G-function example with GP
-- `test_morris_simple.py` - Morris method example
-- `test_sobolG_verbose.py` - Detailed Sobol analysis
-
-## Documentation
-
-- `docs/ARCHITECTURE_SUMMARY.txt` - High-level architecture overview
-- `docs/SURROGATE_DESIGN.md` - Surrogate framework design
-- `docs/GP_IMPROVEMENTS.md` - GP implementation details
-- `docs/OPTIMIZER_GUIDE.md` - Optimizer configuration guide
-- `docs/NUMERICAL_STABILITY.md` - Numerical stability considerations
+- **`test_surrogate_framework.py`** - Complete surrogate pipeline demonstration with adaptive learning
+- **`test_sobol_simple.py`** - Sobol G-function example with Gaussian Process
+- **`test_sobolG_verbose.py`** - Detailed Sobol sensitivity analysis
+- **`test_morris_simple.py`** - Morris screening method example
+- **`test_parametric_variables.py`** - Parametric variable studies
+- **`test_variable_targets.py`** - Variable targeting and sensitivity
+- **`exp_40barTruss.py`** - 40-bar truss finite element case study
+- **`exp_dualOsicllator_degrade.py`** - Dual oscillator degradation analysis
 
 ## Development
 
