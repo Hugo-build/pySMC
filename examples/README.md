@@ -13,12 +13,7 @@ Test scripts that validate specific functionality:
 - **test_surrogate_framework.py**: Comprehensive test of the Surrogate framework (SurrogatePipe, SurrogatePool, adaptive learning utilities)
 - **test_parametric_variables.py**: Tests for ParametricVariable and ConfigMapper
 - **test_variable_targets.py**: Tests for Variable.targets functionality
-- **test_fe_direct.py**: Direct test of FE detection functions
-- **test_fe_server.py**: Test script for the FE MCP server
 
-### Example Scripts (`example_*.py`)
-Example scripts demonstrating specific features:
-- **example_scaled_gp.py**: Demonstrates ScaledGaussianProcess wrapper for automatic data scaling
 
 ### Experiment Scripts (`exp_*.py`)
 Full experimental workflows and case studies:

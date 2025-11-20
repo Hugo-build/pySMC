@@ -494,7 +494,7 @@ cbar3.set_label('Max Displacement [mm]')
 ax3.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('figs/parametric_study_40barTruss.png', dpi=150, bbox_inches='tight')
+#plt.savefig('figs/parametric_study_40barTruss.png', dpi=150, bbox_inches='tight')
 print("\n✓ Plots saved to: figs/parametric_study_40barTruss.png")
 plt.show()
 
@@ -682,7 +682,7 @@ ax2.grid(True, alpha=0.3)
 
 plt.suptitle('GP Surrogate Model Performance (with Data Scaling)', fontsize=16, fontweight='bold')
 plt.tight_layout()
-plt.savefig('figs/surrogate_performance_scaled.png', dpi=150, bbox_inches='tight')
+#plt.savefig('figs/surrogate_performance_scaled.png', dpi=150, bbox_inches='tight')
 print("\n✓ Performance plots saved to: figs/surrogate_performance_scaled.png")
 plt.show()
 
