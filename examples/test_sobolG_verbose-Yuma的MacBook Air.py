@@ -9,6 +9,11 @@ This demonstrates:
 5. Model evaluation metrics
 """
 
+import sys
+from pathlib import Path
+# Add parent directory to path for imports when running from examples/ folder
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -119,14 +124,14 @@ def test_sobol_basic():
     y_test = jnp.array(y_test, dtype=jnp.float32)
     
     # Initialize GP with Matérn 3/2 kernel
-    kernel = Matern32(
-        log_sf=jnp.log(jnp.std(y_train)),
-        log_ls=jnp.log(jnp.ones(dim) * 0.3)
+    kernel = Matern32.from_params(
+        signal_std=float(jnp.std(y_train)),
+        length_scale=jnp.ones(dim) * 0.3
     )
     
-    gp = GaussianProcess(
+    gp = GaussianProcess.from_params(
         kernel=kernel,
-        log_sn2=jnp.log(jnp.array(1e-4)),
+        noise_std=0.01,
         jitter=1e-6
     )
     
@@ -186,18 +191,21 @@ def test_kernel_comparison():
     y_test = jnp.array(y_test, dtype=jnp.float32)
     
     # Test different kernels
+    signal_std = float(jnp.std(y_train))
+    length_scale = jnp.ones(dim) * 0.3
+    
     kernels = {
-        'RBF': RBF(
-            log_sf=jnp.log(jnp.std(y_train)),
-            log_ls=jnp.log(jnp.ones(dim) * 0.3)
+        'RBF': RBF.from_params(
+            signal_std=signal_std,
+            length_scale=length_scale
         ),
-        'Matérn 3/2': Matern32(
-            log_sf=jnp.log(jnp.std(y_train)),
-            log_ls=jnp.log(jnp.ones(dim) * 0.3)
+        'Matérn 3/2': Matern32.from_params(
+            signal_std=signal_std,
+            length_scale=length_scale
         ),
-        'Matérn 5/2': Matern52(
-            log_sf=jnp.log(jnp.std(y_train)),
-            log_ls=jnp.log(jnp.ones(dim) * 0.3)
+        'Matérn 5/2': Matern52.from_params(
+            signal_std=signal_std,
+            length_scale=length_scale
         ),
     }
     
@@ -206,9 +214,9 @@ def test_kernel_comparison():
     for kernel_name, kernel in kernels.items():
         print(f"\n--- Testing {kernel_name} ---")
         
-        gp = GaussianProcess(
+        gp = GaussianProcess.from_params(
             kernel=kernel,
-            log_sn2=jnp.log(jnp.array(1e-4)),
+            noise_std=0.01,
             jitter=1e-6
         )
         
@@ -268,12 +276,12 @@ def test_optimizer_comparison():
     for opt_name, (opt_type, steps, lr) in optimizers.items():
         print(f"\n--- Testing {opt_name} ---")
         
-        kernel = Matern52(
-            log_sf=jnp.log(jnp.std(y_train)),
-            log_ls=jnp.log(jnp.ones(dim) * 0.3)
+        kernel = Matern52.from_params(
+            signal_std=float(jnp.std(y_train)),
+            length_scale=jnp.ones(dim) * 0.3
         )
         
-        gp = GaussianProcess(kernel=kernel, log_sn2=jnp.log(jnp.array(1e-4)))
+        gp = GaussianProcess.from_params(kernel=kernel, noise_std=0.01)
         
         opt_config = optSetup(
             optimizer=opt_type,
@@ -353,7 +361,6 @@ def visualize_results(X_test, y_test, y_pred, y_std, title="Sobol G-function"):
     print("✓ Visualization saved as 'test_sobolG_results.png'")
     plt.show()
     
-
 
 if __name__ == "__main__":
     print("\n" + "="*70)

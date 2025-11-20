@@ -398,14 +398,29 @@ class SurrogatePipe:
     def __post_init__(self):
         """
         Post-initialization setup.
+        
+        Note: Only fits scalers if they haven't been fitted yet. If you pass in
+        already-fitted scalers, they will be used as-is.
         """
-        # Fit scalers only if model carries training data
-        if self.x_scaler is not None and hasattr(self.model, 'X') and getattr(self.model, 'X') is not None:
-            self.x_scaler.fit(to_numpy(self.model.X))
-            self._scaled4X = True
-        if self.y_scaler is not None and hasattr(self.model, 'y') and getattr(self.model, 'y') is not None:
-            self.y_scaler.fit(to_numpy(self.model.y))
-            self._scaled4y = True
+        # Check if x_scaler is already fitted (has mean_ attribute)
+        if self.x_scaler is not None:
+            if getattr(self.x_scaler, 'mean_', None) is not None:
+                # Scaler already fitted, just mark as scaled
+                self._scaled4X = True
+            elif hasattr(self.model, 'X') and getattr(self.model, 'X') is not None:
+                # Scaler not fitted, fit it on model's training data
+                self.x_scaler.fit(to_numpy(self.model.X))
+                self._scaled4X = True
+        
+        # Check if y_scaler is already fitted (has mean_ attribute)
+        if self.y_scaler is not None:
+            if getattr(self.y_scaler, 'mean_', None) is not None:
+                # Scaler already fitted, just mark as scaled
+                self._scaled4y = True
+            elif hasattr(self.model, 'y') and getattr(self.model, 'y') is not None:
+                # Scaler not fitted, fit it on model's training data
+                self.y_scaler.fit(to_numpy(self.model.y))
+                self._scaled4y = True
 
     # ------------------------------------------------------------
     # Configuration helpers for non initialized surrogate pipe
@@ -445,17 +460,66 @@ class SurrogatePipe:
         if not np.isfinite(y_np).all():
             raise ValueError("y contains NaN or Inf")
 
-    def predict(self, X:Array, return_std:bool = False) -> Tuple[Array, Optional[Array]]:
+    # -----------------------
+    # Transform utilities
+    # -----------------------
+    def transform_X(self, X: Array) -> Array:
+        """
+        Apply X scaling if scaler is available.
+        """
+        if self.x_scaler is not None and self._scaled4X:
+            return self.x_scaler.transform(to_numpy(X))
+        return X
+    
+    def postprocess_prediction(self, mean: Array, std: Optional[Array] = None) -> Tuple[Array, Optional[Array]]:
+        """
+        Apply inverse y scaling if scaler is available.
+        """
+        mean_out = mean
+        std_out = std
+        
+        if self.y_scaler is not None and self._scaled4y:
+            mean_np = to_numpy(mean)
+            if mean_np.ndim == 1:
+                mean_np = mean_np.reshape(-1, 1)
+            mean_out = self.y_scaler.inverse_transform(mean_np).flatten()
+            
+            # Scale uncertainty by the y_scaler's scale
+            if std is not None:
+                std_np = to_numpy(std)
+                std_out = std_np * self.y_scaler.scale_[0]
+        
+        return mean_out, std_out
+
+    def predict(self, X:Array, return_std:bool = False) -> Union[Array, Tuple[Array, Array]]:
         """
         Convenience wrapper that applies X-scaling before calling the model and
         y inverse-scaling after. Does not own training; relies on model's predict.
+        
+        Note: This method tries to handle different model backends:
+        - GPax models: Always return (mean, std) tuple
+        - sklearn models: Use return_std parameter
         """
         X_in = self.transform_X(X)
-        out = self.model.predict(X_in, return_std=return_std)
-        if return_std:
-            mean, std = out
-        else:
-            mean, std = out, None
+        
+        # Try to detect the model type and call predict appropriately
+        try:
+            # Try sklearn-style predict with return_std parameter
+            if return_std:
+                out = self.model.predict(X_in, return_std=True)
+                mean, std = out
+            else:
+                mean = self.model.predict(X_in, return_std=False)
+                std = None
+        except TypeError:
+            # Fall back to GPax-style (always returns tuple)
+            out = self.model.predict(X_in)
+            if isinstance(out, tuple) and len(out) == 2:
+                mean, std = out
+            else:
+                mean = out
+                std = None
+        
         mean_pp, std_pp = self.postprocess_prediction(mean, std)
         return (mean_pp, std_pp) if return_std else mean_pp
 
@@ -493,20 +557,36 @@ class SurrogatePipe:
     # -----------------------
     # Prediction function maker (for adaptive hooks)
     # -----------------------
-    def make_predict_fn(self, model: Optional[object] = None) -> Callable[[Array], Tuple[Array, Optional[Array]]]:
+    def make_predict_fn(self, model: Optional[object] = None) -> Callable[[Array], Tuple[Array, Array]]:
         """
         Create a callable that maps X -> (mean, std) using this pipe's
         transform/postprocess with the given model (default: self.model).
+        
+        Returns a function that always returns (mean, std) tuple for consistency
+        with adaptive learning utilities.
         """
         mdl = model if model is not None else self.model
-        def _predict_fn(X: Array) -> Tuple[Array, Optional[Array]]:
+        def _predict_fn(X: Array) -> Tuple[Array, Array]:
             X_in = self.transform_X(X)
-            out = mdl.predict(X_in, return_std=True)
-            mean, std = out
+            
+            # Try to detect the model type and call predict appropriately
+            try:
+                # Try sklearn-style predict with return_std parameter
+                out = mdl.predict(X_in, return_std=True)
+                mean, std = out
+            except TypeError:
+                # Fall back to GPax-style (always returns tuple)
+                out = mdl.predict(X_in)
+                if isinstance(out, tuple) and len(out) == 2:
+                    mean, std = out
+                else:
+                    # Model returns only mean, create dummy std
+                    mean = out
+                    std = jnp.zeros_like(mean)
+            
             return self.postprocess_prediction(mean, std)
         return _predict_fn
    
-
 
 
 class SurrogatePool:
@@ -522,3 +602,15 @@ class SurrogatePool:
         self.surrogates.remove(surrogate)
     def get(self, index: int) -> SurrogatePipe:
         return self.surrogates[index]
+
+
+
+if __name__ == "__main__":
+    """
+    Run tests for the surrogate framework.
+    
+    For comprehensive tests, see: examples/test_surrogate_framework.py
+    """
+    print("Surrogate module loaded successfully.")
+    print("For comprehensive tests, run: python examples/test_surrogate_framework.py")
+

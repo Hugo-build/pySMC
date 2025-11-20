@@ -1,10 +1,15 @@
 """
-Test Morris simple function with pure JAX Gaussian Process (GP.py).
+Test Sobol G-function with pure JAX Gaussian Process (GP.py).
 
 This demonstrates:
-1. Using the Morris simple function as a test problem
+1. Using the Sobol G-function as a test problem
 2. Training and testing with JAX GP
 """
+
+import sys
+from pathlib import Path
+# Add parent directory to path for imports when running from examples/ folder
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +20,7 @@ from datetime import datetime
 from pprint import pprint
 
 from core.GPax import GaussianProcess, RBF, Matern32, Matern52, optSetup
-from core.DoEs import morris_g
+from core.DoEs import sobol_g
 from core.Variables import VariableSet, Variable
 from core.DataWash import train_test_split
 from core.Samplers import sample_inputs
@@ -51,13 +56,13 @@ def plot_results(y_true, y_pred, y_std):
     # Left subplot: Time series with predictions
     plt.subplot(1, 2, 1)
     idx = np.arange(len(y_true))
-    plt.plot(idx, y_true, label="True", color=color_true, linewidth=2, alpha=0.8)
-    plt.scatter(idx, y_pred, label="Predicted", color=color_pred, s=30, alpha=0.7, zorder=3)
+    plt.plot(idx, y_pred, label="True", color=color_pred, linewidth=2, alpha=0.8)
+    plt.scatter(idx, y_true, label="Predicted", color=color_true, s=30, alpha=0.7, zorder=3)
     plt.fill_between(idx, y_pred - 2*y_std, y_pred + 2*y_std, 
                      alpha=0.25, color=color_fill, label="95% confidence", zorder=1)
     plt.xlabel("Sample Index", fontsize=11)
     plt.ylabel("Value", fontsize=11)
-    plt.title("Morris Simple Function", fontsize=12, fontweight='bold')
+    plt.title("Sobol G-Function", fontsize=12, fontweight='bold')
     plt.grid(True, alpha=0.3, color=color_grid, linestyle='--')
     plt.legend(fontsize=9, framealpha=0.9)
     
@@ -78,18 +83,21 @@ def plot_results(y_true, y_pred, y_std):
     return plt
 
 
-a = np.array([3.0, 1.0, 0.5, 1.0, 0.7])
+# Sobol G-function parameters (controls importance of each dimension)
+a = np.array([1.0, 1.0, 1.0, 1.0])  # Equal importance for 4D problem
 n_dim = a.size
-# use the variable set to generate the data
+
+# Use the variable set to generate the data
 vset = VariableSet([
     Variable(name=f"x_{i+1}", kind="uniform", params={"low": 0.0, "high": 1.0})
     for i in range(a.size)
 ])
 
-f = morris_g(a.size)
-print(f)
+f = sobol_g(a)
+print(f"Running Sobol G-function with a = {a}")
+print(f"Problem dimensionality: {n_dim}")
 
-X = sample_inputs(vset, 100, kind="lhs", seed=42)
+X = sample_inputs(vset, 500, kind="lhs", seed=42)
 y = np.array([f(x)["y"] for x in X])
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=123)
@@ -111,14 +119,11 @@ print("================================================")
 
 
 
-
-
-
-# GP with optimized kernelhyperparameters
+# GP with optimized kernel hyperparameters
 opt_config = optSetup(
     optimizer='adam',
-    steps=300,
-    lr=0.01,
+    steps=500,
+    lr=0.05,
     verbose=True,
     log_every=10
 )
@@ -132,3 +137,4 @@ print("Results with optimization:")
 
 fig = plot_results(y_test, y_pred_opt, y_std_opt)
 metrics = print_metrics(y_test, y_pred_opt, y_std_opt)
+

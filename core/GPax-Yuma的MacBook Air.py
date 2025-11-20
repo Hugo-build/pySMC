@@ -193,9 +193,34 @@ class RBF:
     Radial Basis Function (Squared Exponential) kernel.
     
     k(x, x') = σ² exp(-||x - x'||² / (2ℓ²))
+    
+    Usage:
+        # Direct initialization (sklearn-style)
+        kernel = RBF.from_params(signal_std=1.0, length_scale=0.5)
+        
+        # Or with log parameters (for advanced use)
+        kernel = RBF(log_sf=jnp.log(1.0), log_ls=jnp.log(0.5))
     """
     log_sf: jnp.ndarray  # Log signal standard deviation
     log_ls: jnp.ndarray  # Log length scale(s) - can be vector for ARD
+
+    @classmethod
+    def from_params(cls, signal_std: float | jnp.ndarray, 
+                    length_scale: float | jnp.ndarray) -> 'RBF':
+        """
+        Create RBF kernel from direct (non-log) parameters.
+        
+        Args:
+            signal_std: Signal standard deviation σ (positive)
+            length_scale: Length scale ℓ (positive, scalar or vector for ARD)
+        
+        Returns:
+            RBF kernel instance
+        """
+        return cls(
+            log_sf=jnp.log(jnp.asarray(signal_std)),
+            log_ls=jnp.log(jnp.asarray(length_scale))
+        )
 
     def __call__(self, X1: jnp.ndarray, X2: jnp.ndarray) -> jnp.ndarray:
         sf = jnp.exp(self.log_sf)         # The signal variance
@@ -219,9 +244,34 @@ class Matern32:
     Matérn 3/2 kernel - smoother than RBF but allows for some roughness.
     
     k(x, x') = σ² (1 + √3r) exp(-√3r), where r = ||x - x'|| / ℓ
+    
+    Usage:
+        # Direct initialization (sklearn-style)
+        kernel = Matern32.from_params(signal_std=1.0, length_scale=0.5)
+        
+        # Or with log parameters (for advanced use)
+        kernel = Matern32(log_sf=jnp.log(1.0), log_ls=jnp.log(0.5))
     """
     log_sf: jnp.ndarray  # Log signal standard deviation
     log_ls: jnp.ndarray  # Log length scale(s)
+
+    @classmethod
+    def from_params(cls, signal_std: float | jnp.ndarray, 
+                    length_scale: float | jnp.ndarray) -> 'Matern32':
+        """
+        Create Matérn 3/2 kernel from direct (non-log) parameters.
+        
+        Args:
+            signal_std: Signal standard deviation σ (positive)
+            length_scale: Length scale ℓ (positive, scalar or vector for ARD)
+        
+        Returns:
+            Matern32 kernel instance
+        """
+        return cls(
+            log_sf=jnp.log(jnp.asarray(signal_std)),
+            log_ls=jnp.log(jnp.asarray(length_scale))
+        )
 
     def __call__(self, X1: jnp.ndarray, X2: jnp.ndarray) -> jnp.ndarray:
         sf = jnp.exp(self.log_sf) # The signal variance
@@ -246,9 +296,34 @@ class Matern52:
     Matérn 5/2 kernel - twice differentiable, very smooth.
     
     k(x, x') = σ² (1 + √5r + 5r²/3) exp(-√5r), where r = ||x - x'|| / ℓ
+    
+    Usage:
+        # Direct initialization (sklearn-style)
+        kernel = Matern52.from_params(signal_std=1.0, length_scale=0.5)
+        
+        # Or with log parameters (for advanced use)
+        kernel = Matern52(log_sf=jnp.log(1.0), log_ls=jnp.log(0.5))
     """
     log_sf: jnp.ndarray  # Log signal standard deviation
     log_ls: jnp.ndarray  # Log length scale(s)
+
+    @classmethod
+    def from_params(cls, signal_std: float | jnp.ndarray, 
+                    length_scale: float | jnp.ndarray) -> 'Matern52':
+        """
+        Create Matérn 5/2 kernel from direct (non-log) parameters.
+        
+        Args:
+            signal_std: Signal standard deviation σ (positive)
+            length_scale: Length scale ℓ (positive, scalar or vector for ARD)
+        
+        Returns:
+            Matern52 kernel instance
+        """
+        return cls(
+            log_sf=jnp.log(jnp.asarray(signal_std)),
+            log_ls=jnp.log(jnp.asarray(length_scale))
+        )
 
     def __call__(self, X1: jnp.ndarray, X2: jnp.ndarray) -> jnp.ndarray:
         sf = jnp.exp(self.log_sf) # The signal variance
@@ -285,12 +360,39 @@ class GaussianProcess:
      - X, y: Training data (stored after fitting)
     
     FIXED: This is a frozen dataclass, so all updates use replace() to create new instances.
+    
+    Usage:
+        # Direct initialization (sklearn-style, recommended)
+        gp = GaussianProcess.from_params(kernel=kernel, noise_std=0.1)
+        
+        # Or with log parameters (for advanced use)
+        gp = GaussianProcess(kernel=kernel, log_sn2=jnp.log(0.1**2))
     """
     kernel: Kernel
     log_sn2: jnp.ndarray
     jitter: float = 1e-6
     X: Optional[jnp.ndarray] = None
     y: Optional[jnp.ndarray] = None
+
+    @classmethod
+    def from_params(cls, kernel: Kernel, noise_std: float | jnp.ndarray, 
+                    jitter: float = 1e-6) -> 'GaussianProcess':
+        """
+        Create GaussianProcess from direct (non-log) parameters.
+        
+        Args:
+            kernel: Kernel instance (created with Kernel.from_params() or directly)
+            noise_std: Observation noise standard deviation (positive)
+            jitter: Numerical stability term (default 1e-6)
+        
+        Returns:
+            GaussianProcess instance
+        """
+        return cls(
+            kernel=kernel,
+            log_sn2=jnp.log(jnp.asarray(noise_std)**2),
+            jitter=jitter
+        )
 
     def get_params_tree(self) -> Dict[str, Any]:
         """
@@ -537,17 +639,20 @@ if __name__ == "__main__":
     noise_std = 0.15
     y_train = f_true + noise_std * jax.random.normal(key, (N,))
     
-    # Initialize kernel with reasonable hyperparameters
+    # Initialize kernel with reasonable hyperparameters (sklearn-style!)
     D = X_train.shape[1]
-    kernel = RBF(
-        log_sf=jnp.log(jnp.std(y_train) + 1e-6),
-        log_ls=jnp.log(jnp.ones((D,)) * ((X_train.max() - X_train.min()) / 4.0)),
+    signal_std = float(jnp.std(y_train))
+    length_scale = float((X_train.max() - X_train.min()) / 4.0)
+    
+    kernel = RBF.from_params(
+        signal_std=signal_std,
+        length_scale=jnp.ones(D) * length_scale
     )
     
-    # Create GP with initial hyperparameters
-    gp = GaussianProcess(
-        kernel=kernel, 
-        log_sn2=jnp.log(jnp.array(noise_std**2)), 
+    # Create GP with initial hyperparameters (sklearn-style!)
+    gp = GaussianProcess.from_params(
+        kernel=kernel,
+        noise_std=noise_std,
         jitter=1e-6
     )
     

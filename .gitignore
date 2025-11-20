@@ -1,5 +1,6 @@
 # git
 .gitignore
+.onedriveignore
 
 # Python
 __pycache__/
@@ -14,6 +15,22 @@ venv/
 ENV/
 env/
 .uv/
+
+# environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+.env.example
+
+# Encrypted env files (salt can be committed, but not .env itself)
+# .env.encrypted  # Can be committed if you want
+# .env.salt       # Can be committed if you want
+# .env.2fa.secret # Can be committed if you want (it's encrypted)
 
 # Distribution / packaging
 dist/
@@ -69,3 +86,14 @@ figs/*.pdf
 # Temporary files
 *.tmp
 *.bak
+
+# Other projects
+proj0_FE/
+proj0_MC/
+proj0_SU/
+encrypt_env.py
+encrypt_env_2fa.py
+test_api_key.py
+40barTruss
+app.py
+docs/

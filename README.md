@@ -8,6 +8,7 @@ A Python library for probabilistic sampling, Monte Carlo simulation, and surroga
 
 - 🎯 **Monte Carlo Sampling**: Multiple sampling strategies (random, LHS, Sobol sequences)
 - 🔬 **Surrogate Modeling**: JAX-powered Gaussian Process surrogates with multiple kernel types
+- ✨ **sklearn-Style API**: Intuitive parameter interface (no manual log transforms!)
 - 🔄 **Adaptive Sampling**: Built-in adaptive kriging, active learning, and Bayesian optimization
 - 📊 **Design of Experiments**: Sobol G-function and other test functions
 - 🛠️ **CLI Interface**: Command-line tools for Monte Carlo simulation
@@ -54,7 +55,7 @@ Optional dev dependencies:
 ### Basic Gaussian Process Surrogate
 
 ```python
-from core.GPax import GaussianProcess, RBF
+from core.GPax import GaussianProcess, RBF, optSetup
 from core.Variables import VariableSet, Variable
 from core.Samplers import sample_inputs
 import jax.numpy as jnp
@@ -69,10 +70,19 @@ vset = VariableSet([
 X_train = sample_inputs(vset, 100, kind="lhs", seed=42)
 y_train = your_function(X_train)  # Your function here
 
-# Fit GP
-kernel = RBF(log_sf=jnp.log(1.0), log_ls=jnp.log(jnp.ones(2) * 0.1))
-gp = GaussianProcess(kernel=kernel, log_sn2=jnp.log(0.01), jitter=1e-6)
-gp_fitted = gp.fit(jnp.array(X_train), jnp.array(y_train))
+# Create GP with sklearn-style interface (new!)
+kernel = RBF.from_params(
+    signal_std=1.0,
+    length_scale=jnp.ones(2) * 0.1
+)
+gp = GaussianProcess.from_params(
+    kernel=kernel,
+    noise_std=0.1
+)
+
+# Fit GP with hyperparameter optimization
+opt_config = optSetup(optimizer='adam', steps=100, lr=0.01, verbose=True)
+gp_fitted = gp.fit(jnp.array(X_train), jnp.array(y_train), opt_config=opt_config)
 
 # Predict
 X_test = sample_inputs(vset, 50, kind="sobol", seed=123)
@@ -134,9 +144,15 @@ See `docs/SURROGATE_DESIGN.md` for detailed architecture documentation.
 The `GPax.py` module provides a pure JAX implementation:
 
 - Multiple kernel types: RBF, Matern32, Matern52
+- sklearn-style parameter interface (new!)
 - Hyperparameter optimization with Optax
 - Efficient prediction with uncertainty quantification
 - Functional, immutable design
+
+**Documentation:**
+- 📘 [sklearn-Style API Guide](docs/SKLEARN_STYLE_PARAMS.md) - New parameter interface
+- 📘 [GP Improvements](docs/GP_IMPROVEMENTS.md) - Technical improvements
+- 📘 [Optimizer Guide](docs/OPTIMIZER_GUIDE.md) - Hyperparameter optimization
 
 ### Sampling Strategies
 
