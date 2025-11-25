@@ -360,6 +360,24 @@ class StandardScaler:
            X = X.reshape(-1, 1)
        return X * self.scale_ + self.mean_
 
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the standard scaler to a dictionary.
+        """
+        return {
+            "mean": self.mean_.tolist(),
+            "scale": self.scale_.tolist()
+        }
+
+    def from_dict(self, data: Dict[str, Any]) -> StandardScaler:
+        """
+        Convert a dictionary to a standard scaler.
+        """
+        return StandardScaler(
+            mean_=data['mean'],
+            scale_=data['scale']
+        )
+
 
 
 
@@ -523,8 +541,6 @@ class SurrogatePipe:
         mean_pp, std_pp = self.postprocess_prediction(mean, std)
         return (mean_pp, std_pp) if return_std else mean_pp
 
-
-
     # -----------------------
     # Serialization utilities
     # -----------------------
@@ -534,6 +550,8 @@ class SurrogatePipe:
         """
         return {
             'model': self.model,
+            'X': self.X,
+            'y': self.y,
             'x_scaler': self.x_scaler,
             'y_scaler': self.y_scaler,
             'scaledX': self._scaled4X,
