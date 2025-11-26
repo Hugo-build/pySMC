@@ -4,12 +4,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field 
 from typing import Protocol, Dict, List, Any, Tuple, Optional, Union, Callable, Literal
 from enum import Enum
-
+import json
+import sys
+from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 Array = np.ndarray
 
-from .Aquiz import AcquizFunc, VarianceMin
 from .Variables import VariableSet
 from .Weighted import WeightStrategy, SizeNoveltyWeight
 from .DataWash import train_test_split
@@ -69,7 +70,7 @@ NOTE:
 
 
 TODO:
-- [ ] Add a way to save and load the surrogate pipe and pool.
+- [x] Add a way to save and load the surrogate pipe and pool.
 - [ ] Add a general way to have a fit_fn
 - [ ] Add a general way to have a predict_fn
 """
@@ -328,55 +329,87 @@ class Scaler(Protocol):
 @dataclass
 class StandardScaler:
     """
-    Standard scaler.
+    Standard scaler for normalizing data to zero mean and unit variance.
+    
+    Supports JSON serialization for model persistence.
+    
+    Usage:
+        >>> scaler = StandardScaler()
+        >>> scaler.fit(X_train)
+        >>> X_scaled = scaler.transform(X_train)
+        >>> scaler.save("scaler.json")
+        >>> loaded_scaler = StandardScaler.load("scaler.json")
     """
     mean_: Optional[Array] = None
     scale_: Optional[Array] = None
     eps_: float = 1e-6
 
-    def fit(self, X:Array) -> StandardScaler:
-       """
-       Fit the standard scaler to the data.
-       """
-       if X.ndim == 1:
-           X = X.reshape(-1, 1)
-       self.mean_ = X.mean(axis=0)
-       self.scale_ = X.std(axis=0) + self.eps_
-       return self
+    def fit(self, X: Array) -> StandardScaler:
+        """
+        Fit the standard scaler to the data.
+        """
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        self.mean_ = X.mean(axis=0)
+        self.scale_ = X.std(axis=0) + self.eps_
+        return self
 
-    def transform(self, X:Array) -> Array:
-       """
-       Transform the data.
-       """
-       if X.ndim == 1:
-           X = X.reshape(-1, 1)
-       return (X - self.mean_) / self.scale_
+    def transform(self, X: Array) -> Array:
+        """
+        Transform the data.
+        """
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        return (X - self.mean_) / self.scale_
 
-    def inverse_transform(self, X:Array) -> Array:
-       """
-       Inverse transform the data.
-       """
-       if X.ndim == 1:
-           X = X.reshape(-1, 1)
-       return X * self.scale_ + self.mean_
+    def inverse_transform(self, X: Array) -> Array:
+        """
+        Inverse transform the data.
+        """
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        return X * self.scale_ + self.mean_
 
+    # ===== Serialization Methods =====
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert the standard scaler to a dictionary.
-        """
+        """Convert the scaler to a serializable dictionary."""
         return {
-            "mean": self.mean_.tolist(),
-            "scale": self.scale_.tolist()
+            "type": "StandardScaler",
+            "mean": self.mean_.tolist() if self.mean_ is not None else None,
+            "scale": self.scale_.tolist() if self.scale_ is not None else None,
+            "eps": self.eps_
         }
 
-    def from_dict(self, data: Dict[str, Any]) -> StandardScaler:
-        """
-        Convert a dictionary to a standard scaler.
-        """
-        return StandardScaler(
-            mean_=data['mean'],
-            scale_=data['scale']
+    def to_json(self, indent: int = 2) -> str:
+        """Convert scaler to JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
+
+    def save(self, filepath: Union[str, Path]) -> None:
+        """Save scaler to a JSON file."""
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            f.write(self.to_json())
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> StandardScaler:
+        """Create a StandardScaler from a dictionary."""
+        return cls(
+            mean_=np.array(data['mean']) if data.get('mean') is not None else None,
+            scale_=np.array(data['scale']) if data.get('scale') is not None else None,
+            eps_=data.get('eps', 1e-6)
         )
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> StandardScaler:
+        """Create a StandardScaler from a JSON string."""
+        return cls.from_dict(json.loads(json_str))
+    
+    @classmethod
+    def load(cls, filepath: Union[str, Path]) -> StandardScaler:
+        """Load a StandardScaler from a JSON file."""
+        with open(filepath, 'r') as f:
+            return cls.from_json(f.read())
 
 
 
@@ -541,36 +574,359 @@ class SurrogatePipe:
         mean_pp, std_pp = self.postprocess_prediction(mean, std)
         return (mean_pp, std_pp) if return_std else mean_pp
 
-    # -----------------------
+    # =========================================
     # Serialization utilities
-    # -----------------------
-    def to_dict(self) -> Dict[str, Any]:
+    # =========================================
+    
+    def _detect_model_type(self) -> str:
+        """Detect the model backend type for serialization."""
+        model_class = self.model.__class__.__name__
+        model_module = self.model.__class__.__module__
+        
+        # Check for GPax models
+        if 'GPax' in model_module or model_class == 'GaussianProcess':
+            return 'gpax'
+        # Check for sklearn models
+        elif 'sklearn' in model_module:
+            return 'sklearn'
+        elif 'torch' in model_module:
+            return 'torch'
+        else:
+            return 'unknown'
+    
+    def _serialize_scaler(self, scaler: Optional[Scaler]) -> Optional[Dict[str, Any]]:
+        """Serialize a scaler to dict if it has to_dict method."""
+        if scaler is None:
+            return None
+        if hasattr(scaler, 'to_dict'):
+            return scaler.to_dict()
+        return None
+    
+    def to_dict(self, include_data: bool = True) -> Dict[str, Any]:
         """
-        Convert the surrogate pipeline to a dictionary.
+        Convert the surrogate pipeline to a serializable dictionary.
+        
+        Args:
+            include_data: Whether to include X, y, X_train, etc. (default True)
+        
+        Returns:
+            Dictionary with all serializable pipeline components
+        
+        Note: The model must have a to_dict() method for JSON serialization.
+              For GPax models, this is built-in. For sklearn models, 
+              use the folder-based save() method instead.
         """
-        return {
-            'model': self.model,
-            'X': self.X,
-            'y': self.y,
-            'x_scaler': self.x_scaler,
-            'y_scaler': self.y_scaler,
-            'scaledX': self._scaled4X,
-            'scaledY': self._scaled4y,
-            'verbose': self.verbose
+        result = {
+            'version': '1.0',
+            'model_type': self._detect_model_type(),
+            'x_scaler': self._serialize_scaler(self.x_scaler),
+            'y_scaler': self._serialize_scaler(self.y_scaler),
+            'scaled4X': self._scaled4X,
+            'scaled4y': self._scaled4y,
+            'verbose': self.verbose,
+            'fitted': self._fitted,
         }
         
-    def from_dict(self, data: Dict[str, Any]) -> SurrogatePipe:
+        # Include model if it has to_dict method
+        if hasattr(self.model, 'to_dict'):
+            result['model'] = self.model.to_dict()
+        else:
+            result['model'] = None
+            result['_model_warning'] = f"Model type '{type(self.model).__name__}' does not support JSON serialization"
+        
+        # Include data arrays
+        if include_data:
+            result['X'] = self.X.tolist() if self.X is not None else None
+            result['y'] = self.y.tolist() if self.y is not None else None
+            result['X_train'] = self.X_train.tolist() if self.X_train is not None else None
+            result['y_train'] = self.y_train.tolist() if self.y_train is not None else None
+            result['X_test'] = self.X_test.tolist() if self.X_test is not None else None
+            result['y_test'] = self.y_test.tolist() if self.y_test is not None else None
+        
+        return result
+    
+    def to_json(self, include_data: bool = True, indent: int = 2) -> str:
+        """Convert pipeline to JSON string."""
+        return json.dumps(self.to_dict(include_data=include_data), indent=indent)
+    
+    def save(self, 
+             filepath: Union[str, Path],
+             as_folder: bool = False,
+             include_data: bool = True) -> None:
         """
-        Convert a dictionary to a surrogate pipeline.
+        Save the surrogate pipeline to disk.
+        
+        Args:
+            filepath: Path to save location
+                - If as_folder=False: path to .json file
+                - If as_folder=True: path to folder
+            as_folder: If True, saves as folder with separate files for model, scalers, data
+            include_data: Whether to include training/test data
+        
+        Example:
+            # Save as single JSON file
+            >>> pipe.save("my_pipe.json")
+            
+            # Save as folder (better for large data)
+            >>> pipe.save("my_pipe_folder", as_folder=True)
         """
-        return SurrogatePipe(
-            model=data['model'],
-            x_scaler=data['x_scaler'],
-            y_scaler=data['y_scaler'],
-            _scaled4X=data.get('scaledX', False),
-            _scaled4y=data.get('scaledY', False),
-            verbose=data.get('verbose', False)
-        )
+        filepath = Path(filepath)
+        
+        if as_folder:
+            self._save_as_folder(filepath, include_data)
+        else:
+            self._save_as_json(filepath, include_data)
+    
+    def _save_as_json(self, filepath: Path, include_data: bool) -> None:
+        """Save pipeline as a single JSON file."""
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            f.write(self.to_json(include_data=include_data))
+        print(f"✓ SurrogatePipe saved to '{filepath}'")
+    
+    def _save_as_folder(self, dirpath: Path, include_data: bool) -> None:
+        """Save pipeline as a folder with separate files."""
+        dirpath.mkdir(parents=True, exist_ok=True)
+        
+        # Save manifest
+        manifest = {
+            'version': '1.0',
+            'model_type': self._detect_model_type(),
+            'has_model': hasattr(self.model, 'to_dict'),
+            'has_x_scaler': self.x_scaler is not None,
+            'has_y_scaler': self.y_scaler is not None,
+            'has_data': include_data,
+            'scaled4X': self._scaled4X,
+            'scaled4y': self._scaled4y,
+            'verbose': self.verbose,
+            'fitted': self._fitted,
+        }
+        with open(dirpath / 'manifest.json', 'w') as f:
+            json.dump(manifest, f, indent=2)
+        
+        # Save model if it supports serialization
+        if hasattr(self.model, 'save'):
+            self.model.save(dirpath / 'model.json')
+        elif hasattr(self.model, 'to_dict'):
+            with open(dirpath / 'model.json', 'w') as f:
+                json.dump(self.model.to_dict(), f, indent=2)
+        
+        # Save scalers
+        if self.x_scaler is not None and hasattr(self.x_scaler, 'save'):
+            self.x_scaler.save(dirpath / 'x_scaler.json')
+        if self.y_scaler is not None and hasattr(self.y_scaler, 'save'):
+            self.y_scaler.save(dirpath / 'y_scaler.json')
+        
+        # Save data arrays
+        if include_data:
+            data = {}
+            if self.X is not None:
+                data['X'] = self.X.tolist()
+            if self.y is not None:
+                data['y'] = self.y.tolist()
+            if self.X_train is not None:
+                data['X_train'] = self.X_train.tolist()
+            if self.y_train is not None:
+                data['y_train'] = self.y_train.tolist()
+            if self.X_test is not None:
+                data['X_test'] = self.X_test.tolist()
+            if self.y_test is not None:
+                data['y_test'] = self.y_test.tolist()
+            
+            if data:
+                with open(dirpath / 'data.json', 'w') as f:
+                    json.dump(data, f, indent=2)
+        
+        print(f"✓ SurrogatePipe saved to folder '{dirpath}/'")
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], model: Optional[object] = None) -> SurrogatePipe:
+        """
+        Create a SurrogatePipe from a dictionary.
+        
+        Args:
+            data: Dictionary from to_dict()
+            model: Pre-loaded model object. Required if model wasn't serialized.
+        
+        Returns:
+            SurrogatePipe instance
+        """
+        # Reconstruct scalers
+        x_scaler = None
+        y_scaler = None
+        
+        if data.get('x_scaler') is not None:
+            scaler_data = data['x_scaler']
+            if scaler_data.get('type') == 'StandardScaler':
+                x_scaler = StandardScaler.from_dict(scaler_data)
+        
+        if data.get('y_scaler') is not None:
+            scaler_data = data['y_scaler']
+            if scaler_data.get('type') == 'StandardScaler':
+                y_scaler = StandardScaler.from_dict(scaler_data)
+        
+        # Reconstruct model if provided in data and model_type is 'gpax'
+        loaded_model = model
+        if loaded_model is None and data.get('model') is not None:
+            model_type = data.get('model_type', 'unknown')
+            if model_type == 'gpax':
+                # Import GPax and reconstruct
+                try:
+                    from .GPax import GaussianProcess
+                    loaded_model, _ = GaussianProcess.from_dict(data['model'])
+                except ImportError:
+                    raise ValueError("Cannot load GPax model - GPax module not available")
+        
+        if loaded_model is None:
+            raise ValueError(
+                "Model could not be loaded from data. "
+                "Please provide a pre-loaded model via the 'model' parameter."
+            )
+        
+        # Reconstruct data arrays
+        X = np.array(data['X']) if data.get('X') is not None else None
+        y = np.array(data['y']) if data.get('y') is not None else None
+        X_train = np.array(data['X_train']) if data.get('X_train') is not None else None
+        y_train = np.array(data['y_train']) if data.get('y_train') is not None else None
+        X_test = np.array(data['X_test']) if data.get('X_test') is not None else None
+        y_test = np.array(data['y_test']) if data.get('y_test') is not None else None
+        
+        # Create pipe without triggering __post_init__ scaler fitting
+        pipe = cls.__new__(cls)
+        pipe.model = loaded_model
+        pipe.varSet = None
+        pipe.X = X
+        pipe.y = y
+        pipe.X_train = X_train
+        pipe.y_train = y_train
+        pipe.X_test = X_test
+        pipe.y_test = y_test
+        pipe.x_scaler = x_scaler
+        pipe.y_scaler = y_scaler
+        pipe._scaled4X = data.get('scaled4X', False)
+        pipe._scaled4y = data.get('scaled4y', False)
+        pipe.verbose = data.get('verbose', False)
+        pipe._fitted = data.get('fitted', False)
+        
+        return pipe
+    
+    @classmethod
+    def from_json(cls, json_str: str, model: Optional[object] = None) -> SurrogatePipe:
+        """Create a SurrogatePipe from a JSON string."""
+        return cls.from_dict(json.loads(json_str), model=model)
+    
+    @classmethod
+    def load(cls, filepath: Union[str, Path], model: Optional[object] = None) -> SurrogatePipe:
+        """
+        Load a SurrogatePipe from disk.
+        
+        Args:
+            filepath: Path to saved pipeline (.json file or folder)
+            model: Pre-loaded model object (required for sklearn models)
+        
+        Returns:
+            SurrogatePipe instance
+        
+        Example:
+            # Load from JSON file (GPax models auto-loaded)
+            >>> pipe = SurrogatePipe.load("my_pipe.json")
+            
+            # Load from folder
+            >>> pipe = SurrogatePipe.load("my_pipe_folder")
+            
+            # Load with external model (for sklearn)
+            >>> from sklearn.gaussian_process import GaussianProcessRegressor
+            >>> my_model = train_sklearn_model(X, y)
+            >>> pipe = SurrogatePipe.load("my_pipe.json", model=my_model)
+        """
+        filepath = Path(filepath)
+        
+        if filepath.is_dir():
+            return cls._load_from_folder(filepath, model)
+        else:
+            return cls._load_from_json(filepath, model)
+    
+    @classmethod
+    def _load_from_json(cls, filepath: Path, model: Optional[object] = None) -> SurrogatePipe:
+        """Load pipeline from a single JSON file."""
+        with open(filepath, 'r') as f:
+            pipe = cls.from_json(f.read(), model=model)
+        print(f"✓ SurrogatePipe loaded from '{filepath}'")
+        return pipe
+    
+    @classmethod
+    def _load_from_folder(cls, dirpath: Path, model: Optional[object] = None) -> SurrogatePipe:
+        """Load pipeline from a folder."""
+        # Load manifest
+        with open(dirpath / 'manifest.json', 'r') as f:
+            manifest = json.load(f)
+        
+        # Load model
+        loaded_model = model
+        if loaded_model is None and manifest.get('has_model'):
+            model_path = dirpath / 'model.json'
+            if model_path.exists():
+                model_type = manifest.get('model_type', 'unknown')
+                if model_type == 'gpax':
+                    from .GPax import GaussianProcess
+                    loaded_model, _ = GaussianProcess.load(model_path)
+                else:
+                    # Try to load as generic dict
+                    with open(model_path, 'r') as f:
+                        model_data = json.load(f)
+                    # User must provide model
+                    if model is None:
+                        raise ValueError(
+                            f"Model type '{model_type}' requires you to provide a pre-loaded model."
+                        )
+        
+        if loaded_model is None:
+            raise ValueError("Could not load model. Please provide via 'model' parameter.")
+        
+        # Load scalers
+        x_scaler = None
+        y_scaler = None
+        
+        x_scaler_path = dirpath / 'x_scaler.json'
+        if x_scaler_path.exists():
+            x_scaler = StandardScaler.load(x_scaler_path)
+        
+        y_scaler_path = dirpath / 'y_scaler.json'
+        if y_scaler_path.exists():
+            y_scaler = StandardScaler.load(y_scaler_path)
+        
+        # Load data
+        X = y = X_train = y_train = X_test = y_test = None
+        data_path = dirpath / 'data.json'
+        if data_path.exists():
+            with open(data_path, 'r') as f:
+                data = json.load(f)
+            X = np.array(data['X']) if data.get('X') else None
+            y = np.array(data['y']) if data.get('y') else None
+            X_train = np.array(data['X_train']) if data.get('X_train') else None
+            y_train = np.array(data['y_train']) if data.get('y_train') else None
+            X_test = np.array(data['X_test']) if data.get('X_test') else None
+            y_test = np.array(data['y_test']) if data.get('y_test') else None
+        
+        # Create pipe
+        pipe = cls.__new__(cls)
+        pipe.model = loaded_model
+        pipe.varSet = None
+        pipe.X = X
+        pipe.y = y
+        pipe.X_train = X_train
+        pipe.y_train = y_train
+        pipe.X_test = X_test
+        pipe.y_test = y_test
+        pipe.x_scaler = x_scaler
+        pipe.y_scaler = y_scaler
+        pipe._scaled4X = manifest.get('scaled4X', False)
+        pipe._scaled4y = manifest.get('scaled4y', False)
+        pipe.verbose = manifest.get('verbose', False)
+        pipe._fitted = manifest.get('fitted', False)
+        
+        print(f"✓ SurrogatePipe loaded from folder '{dirpath}/'")
+        return pipe
 
     # -----------------------
     # Prediction function maker (for adaptive hooks)
@@ -609,26 +965,154 @@ class SurrogatePipe:
 
 class SurrogatePool:
     """
-    Surrogate pool.
+    Pool of surrogate model pipelines.
+    
+    Manages multiple SurrogatePipe instances and supports saving/loading
+    the entire pool as a folder structure.
+    
+    Usage:
+        >>> pool = SurrogatePool([pipe1, pipe2, pipe3])
+        >>> pool.save("my_pool")  # Saves as folder
+        >>> loaded_pool = SurrogatePool.load("my_pool")
     """
     surrogates: List[SurrogatePipe]
-    def __init__(self, surrogates: List[SurrogatePipe]):
-        self.surrogates = surrogates
-    def add(self, surrogate: SurrogatePipe) -> None:
-        self.surrogates.append(surrogate)
-    def remove(self, surrogate: SurrogatePipe) -> None:
-        self.surrogates.remove(surrogate)
-    def get(self, index: int) -> SurrogatePipe:
-        return self.surrogates[index]
-
-
-
-if __name__ == "__main__":
-    """
-    Run tests for the surrogate framework.
     
-    For comprehensive tests, see: examples/test_surrogate_framework.py
-    """
-    print("Surrogate module loaded successfully.")
-    print("For comprehensive tests, run: python examples/test_surrogate_framework.py")
+    def __init__(self, surrogates: Optional[List[SurrogatePipe]] = None):
+        self.surrogates = surrogates if surrogates is not None else []
+    
+    def add(self, surrogate: SurrogatePipe) -> None:
+        """Add a surrogate pipe to the pool."""
+        self.surrogates.append(surrogate)
+    
+    def remove(self, surrogate: SurrogatePipe) -> None:
+        """Remove a surrogate pipe from the pool."""
+        self.surrogates.remove(surrogate)
+    
+    def get(self, index: int) -> SurrogatePipe:
+        """Get a surrogate pipe by index."""
+        return self.surrogates[index]
+    
+    def __len__(self) -> int:
+        """Return the number of surrogates in the pool."""
+        return len(self.surrogates)
+    
+    def __iter__(self):
+        """Iterate over surrogates."""
+        return iter(self.surrogates)
+    
+    def __getitem__(self, index: int) -> SurrogatePipe:
+        """Get surrogate by index."""
+        return self.surrogates[index]
+    
+    # ===== Serialization Methods =====
+    def save(self, 
+             dirpath: Union[str, Path],
+             include_data: bool = True) -> None:
+        """
+        Save the entire pool as a folder structure.
+        
+        Structure:
+            dirpath/
+            ├── manifest.json      # Pool metadata
+            ├── pipe_0/            # First pipe (folder)
+            ├── pipe_1/            # Second pipe (folder)
+            └── ...
+        
+        Args:
+            dirpath: Path to the pool folder
+            include_data: Whether to include training/test data for each pipe
+        
+        Example:
+            >>> pool.save("my_surrogate_pool")
+        """
+        dirpath = Path(dirpath)
+        dirpath.mkdir(parents=True, exist_ok=True)
+        
+        # Save manifest
+        manifest = {
+            'version': '1.0',
+            'num_surrogates': len(self.surrogates),
+            'pipe_names': [f'pipe_{i}' for i in range(len(self.surrogates))],
+        }
+        with open(dirpath / 'manifest.json', 'w') as f:
+            json.dump(manifest, f, indent=2)
+        
+        # Save each pipe as a folder
+        for i, pipe in enumerate(self.surrogates):
+            pipe_dir = dirpath / f'pipe_{i}'
+            pipe.save(pipe_dir, as_folder=True, include_data=include_data)
+        
+        print(f"✓ SurrogatePool saved to '{dirpath}/' ({len(self.surrogates)} pipes)")
+    
+    @classmethod
+    def load(cls, 
+             dirpath: Union[str, Path],
+             models: Optional[List[object]] = None) -> SurrogatePool:
+        """
+        Load a SurrogatePool from a folder.
+        
+        Args:
+            dirpath: Path to the pool folder
+            models: Optional list of pre-loaded models (for sklearn, etc.)
+                   Must match the number of pipes if provided.
+        
+        Returns:
+            SurrogatePool instance with all pipes loaded
+        
+        Example:
+            >>> pool = SurrogatePool.load("my_surrogate_pool")
+            >>> print(f"Loaded {len(pool)} pipes")
+        """
+        dirpath = Path(dirpath)
+        
+        # Load manifest
+        with open(dirpath / 'manifest.json', 'r') as f:
+            manifest = json.load(f)
+        
+        num_surrogates = manifest['num_surrogates']
+        pipe_names = manifest.get('pipe_names', [f'pipe_{i}' for i in range(num_surrogates)])
+        
+        # Validate models list if provided
+        if models is not None and len(models) != num_surrogates:
+            raise ValueError(
+                f"Number of models ({len(models)}) doesn't match "
+                f"number of pipes ({num_surrogates})"
+            )
+        
+        # Load each pipe
+        surrogates = []
+        for i, pipe_name in enumerate(pipe_names):
+            pipe_dir = dirpath / pipe_name
+            model = models[i] if models is not None else None
+            pipe = SurrogatePipe.load(pipe_dir, model=model)
+            surrogates.append(pipe)
+        
+        pool = cls(surrogates)
+        print(f"✓ SurrogatePool loaded from '{dirpath}/' ({len(surrogates)} pipes)")
+        return pool
+    
+    def to_summary(self) -> Dict[str, Any]:
+        """
+        Get a summary of the pool (without full serialization).
+        
+        Returns:
+            Dictionary with pool summary info
+        """
+        summaries = []
+        for i, pipe in enumerate(self.surrogates):
+            summary = {
+                'index': i,
+                'model_type': pipe._detect_model_type(),
+                'has_x_scaler': pipe.x_scaler is not None,
+                'has_y_scaler': pipe.y_scaler is not None,
+                'n_samples': pipe.X.shape[0] if pipe.X is not None else 0,
+                'n_features': pipe.X.shape[1] if pipe.X is not None else 0,
+            }
+            summaries.append(summary)
+        
+        return {
+            'num_surrogates': len(self.surrogates),
+            'pipes': summaries
+        }
+
 
