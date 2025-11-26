@@ -14,7 +14,7 @@ from SALib.analyze.sobol import analyze as SA_analyze
 from typing import Tuple, Dict, Callable, Optional
 from pprint import pprint
 
-from FElib import elMatrixBar6DoF, rotateMat
+from lib.FElib import elMatrixBar6DoF, rotateMat
 from core.GPax import RBF, GaussianProcess, optSetup
 from core.DataWash import train_test_split, scale_data
 

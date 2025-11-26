@@ -7,7 +7,9 @@ modeling with built-in support for adaptive sampling strategies.
 
 __version__ = "0.1.0"
 __author__ = "yuma"
-
+# =============================================================
+#                     Import core modules
+# =============================================================
 # Core surrogate modeling framework
 from .core.Surrogates import (
     SurrogatePipe,
@@ -80,6 +82,19 @@ from .core.Aquiz import (
 # Safe expression evaluation
 from .core.SafeEval import evaluate_expression
 
+#
+# =============================================================
+#                         Import dependent libraries
+# =============================================================
+from.lib import FElib
+
+
+
+
+
+# =============================================================
+#                         Define public API
+# =============================================================
 # Define public API
 __all__ = [
     # Version info
