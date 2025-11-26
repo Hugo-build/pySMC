@@ -79,6 +79,7 @@ archive/
 figs/*.png
 figs/*.jpg
 figs/*.pdf
+figs/
 savings/
 
 # Logs
