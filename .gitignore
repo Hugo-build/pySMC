@@ -79,6 +79,7 @@ archive/
 figs/*.png
 figs/*.jpg
 figs/*.pdf
+savings/
 
 # Logs
 *.log
@@ -97,3 +98,4 @@ test_api_key.py
 40barTruss
 app.py
 docs/
+
