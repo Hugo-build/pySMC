@@ -4,6 +4,23 @@
 
 A Python library for probabilistic sampling, Monte Carlo simulation, and surrogate modeling with built-in support for adaptive sampling strategies (adaptive kriging, active learning, Bayesian optimization).
 
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-≥3.10-yellow)
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Project Structure](#project-structure)
+- [Key Components](#key-components)
+- [Examples](#examples)
+- [Development](#development)
+- [Credits](#credits)
+
+
+
 ## Features
 
 - 🎯 **Monte Carlo Sampling**: Multiple sampling strategies (random, LHS, Sobol sequences)
@@ -321,19 +338,7 @@ ruff check .
 ruff format .
 ```
 
-## License
-
-MIT License
-
-## Authors
-
-- Hugo
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Import Structure
+### Import Structure
 
 pySMC now provides a clean, intuitive API. You can import everything directly from the main package:
 
@@ -357,7 +362,88 @@ from pySMC.core.Variables import Variable, VariableSet
 
 For more details, see [IMPORT_GUIDE.md](IMPORT_GUIDE.md).
 
-## TODO
+See [TODO.md](TODO.md) for planned features and improvements.
 
-See `TODO.md` for planned features and improvements.
+
+## Credits
+
+### License
+
+MIT License
+
+### Authors
+
+- Hugo
+
+### Contributing
+
+Contributions are welcome! Here's how to contribute:
+
+#### 1. Fork the Repository
+
+Click the **Fork** button on GitHub to create your own copy of the repository.
+
+#### 2. Clone Your Fork
+
+```bash
+git clone https://github.com/YOUR-USERNAME/pySMC.git
+cd pySMC
+```
+
+#### 3. Add Upstream Remote
+
+Link to the original repository to stay in sync:
+
+```bash
+git remote add upstream https://github.com/ORIGINAL-OWNER/pySMC.git
+```
+
+#### 4. Create a Feature Branch
+
+Always work on a new branch, not `main`:
+
+```bash
+git checkout -b feature/your-feature-name
+# or for bug fixes:
+git checkout -b fix/bug-description
+```
+
+#### 5. Make Your Changes
+
+Edit files, add features, or fix bugs. Then stage and commit:
+
+```bash
+git add .
+git commit -m "feat: add new sampling method"
+```
+
+**Commit message tips:**
+- `feat:` for new features
+- `fix:` for bug fixes
+- `docs:` for documentation
+- `refactor:` for code restructuring
+
+#### 6. Stay Updated with Upstream
+
+Before pushing, sync with the latest changes:
+
+```bash
+git fetch upstream
+git rebase upstream/main
+```
+
+#### 7. Push to Your Fork
+
+```bash
+git push origin feature/your-feature-name
+```
+
+#### 8. Create a Pull Request
+
+1. Go to your fork on GitHub
+2. Click **"Compare & pull request"**
+3. Write a clear description of your changes
+4. Submit the PR
+
+We'll review your contribution and provide feedback. Thank you for helping improve pySMC!
 

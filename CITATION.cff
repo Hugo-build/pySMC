@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "pySMC: Probabilistic Sampling, Monte Carlo, and Surrogate Modeling Utilities in a production pipeline"
+authors:
+  - given-names: Hugo
+    # family-names: YourLastName  # Uncomment and add your last name
+    # orcid: https://orcid.org/0000-0000-0000-0000  # Add your ORCID if you have one
+repository-code: "https://github.com/your-username/pySMC"
+url: "https://github.com/your-username/pySMC"
+license: MIT
+version: "0.1.0"
+date-released: "2025-01-01"
+keywords:
+  - surrogate-modeling
+  - gaussian-process
+  - monte-carlo
+  - bayesian-optimization
+  - adaptive-sampling
+  - jax
+  - python
+abstract: >-
+  A Python library for probabilistic sampling, Monte Carlo simulation, 
+  and surrogate modeling with built-in support for update strategies. 
+  The workflow is designed as pipeline and pool for managing multiple surrogates.
+
