@@ -12,6 +12,8 @@ class Variable:
     params: Dict[str, float] = field(default_factory=dict)
     targets: List[Dict[str, Any]] = field(default_factory=list)  # Config injection targets
     default: Optional[float] = None  # Default value if not sampled
+    description: Optional[str] = None  # Description of the variable
+    unit: Optional[str] = None  # Unit of the variable
 
     def sample(self, n: int, rng: np.random.Generator) -> np.ndarray:
         if self.kind == "fixed":
