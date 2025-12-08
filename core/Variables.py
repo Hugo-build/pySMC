@@ -32,7 +32,7 @@ class Variable:
             return rng.lognormal(mean, sigma, size=n)
         raise ValueError(f"Unknown variable kind: {self.kind}")
     
-    def add_target(self, doc: str, path: str) -> None:
+    def add_target(self, path: str, doc: Optional[str] = None) -> None:
         """Add a target location for config injection.
         
         Args:
@@ -44,6 +44,26 @@ class Variable:
     def has_targets(self) -> bool:
         """Check if variable has any targets defined."""
         return len(self.targets) > 0
+    
+    def to_dict(self) -> Dict:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "params": self.params,
+            "description": self.description,
+            "unit": self.unit,
+            "targets": self.targets
+        }
+    
+    def from_dict(self, dict: Dict) -> Variable:
+        return Variable(
+            name=dict["name"],
+            kind=dict["kind"],
+            params=dict["params"],
+            description=dict["description"],
+            unit=dict["unit"],
+            targets=dict["targets"]
+        )
 
 @dataclass
 class VariableSet:
@@ -71,6 +91,14 @@ class VariableSet:
     def _latexify(self) -> List[str]:
         # return a list of latexified variable names
         return [f"${v.name}$" for v in self.variables]
+    
+    def to_dict(self) -> Dict:
+        return {
+            "variables": [v.to_dict() for v in self.variables]
+        }
+    
+    def from_dict(self, dict: Dict) -> VariableSet:
+        return VariableSet(variables=[Variable(**v) for v in dict["variables"]])
 
     def to_SAlib(self) -> Dict:
         # return a dictionary of variables in the format of SAlib
@@ -283,6 +311,7 @@ def inject_single_config(
         for target in var.targets:
             path = target["path"]
             _inject_at_path(new_config, path, value)
+            print(f"Injected {var.name} = {value} at {path}")
     
     return new_config
 
