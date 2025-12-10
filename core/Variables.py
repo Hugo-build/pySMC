@@ -4,6 +4,8 @@ from typing import Dict, List, Tuple, Any, Optional, Callable, Union
 import numpy as np
 import copy
 import re
+import json
+
 
 @dataclass
 class Variable:
@@ -14,6 +16,7 @@ class Variable:
     default: Optional[float] = None  # Default value if not sampled
     description: Optional[str] = None  # Description of the variable
     unit: Optional[str] = None  # Unit of the variable
+
 
     def sample(self, n: int, rng: np.random.Generator) -> np.ndarray:
         if self.kind == "fixed":
@@ -55,14 +58,15 @@ class Variable:
             "targets": self.targets
         }
     
-    def from_dict(self, dict: Dict) -> Variable:
-        return Variable(
-            name=dict["name"],
-            kind=dict["kind"],
-            params=dict["params"],
-            description=dict["description"],
-            unit=dict["unit"],
-            targets=dict["targets"]
+    @classmethod
+    def from_dict(cls, data: Dict) -> Variable:
+        return cls(
+            name=data["name"],
+            kind=data["kind"],
+            params=data["params"],
+            description=data.get("description"),
+            unit=data.get("unit"),
+            targets=data.get("targets", [])
         )
 
 @dataclass
@@ -97,8 +101,14 @@ class VariableSet:
             "variables": [v.to_dict() for v in self.variables]
         }
     
-    def from_dict(self, dict: Dict) -> VariableSet:
-        return VariableSet(variables=[Variable(**v) for v in dict["variables"]])
+    @classmethod
+    def from_dict(cls, data: Dict) -> VariableSet:
+        return cls(variables=[Variable(**v) for v in data["variables"]])
+
+    @classmethod
+    def from_json(cls, json_path: str) -> VariableSet:
+        with open(json_path, "r") as f:
+            return cls.from_dict(json.load(f))
 
     def to_SAlib(self) -> Dict:
         # return a dictionary of variables in the format of SAlib

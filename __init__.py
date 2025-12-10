@@ -82,6 +82,24 @@ from .core.Aquiz import (
 # Safe expression evaluation
 from .core.SafeEval import evaluate_expression
 
+# I/O utilities for manifest-based config loading
+from .io.manifest import (
+    load_configs_from_manifest,
+    inject_from_varset,
+    inject_cases,
+    ManifestLoader,
+)
+
+# Parallel runner for batch simulations
+from .io.runner import (
+    ParallelRunner,
+    SlurmJobRunner,
+    SimpleFunctionRunner,
+    RunnerConfig,
+    run_parallel,
+    get_n_workers,
+)
+
 #
 # =============================================================
 #                         Import dependent libraries
@@ -123,6 +141,20 @@ __all__ = [
     "Variable",
     "VariableSet",
     "inject_single_config",
+    
+    # I/O - Manifest loading
+    "load_configs_from_manifest",
+    "inject_from_varset",
+    "inject_cases",
+    "ManifestLoader",
+    
+    # I/O - Parallel runner
+    "ParallelRunner",
+    "SlurmJobRunner",
+    "SimpleFunctionRunner",
+    "RunnerConfig",
+    "run_parallel",
+    "get_n_workers",
     
     # Sampling
     "sample_inputs",
