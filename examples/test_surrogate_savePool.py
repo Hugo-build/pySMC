@@ -35,7 +35,7 @@ from pprint import pprint
 
 # Import GPax components
 from core.GPax import GaussianProcess, RBF, optSetup
-from core.Surrogates import SurrogatePipe, SurrogatePool, StandardScaler, to_numpy
+from core.Surrogates import SurrogatePipe, SurrogatePool, StandardScaler, to_numpy, SurrogateGPax
 from core.DoEs import sobol_g
 from core.Variables import VariableSet, Variable
 from core.DataWash import train_test_split
@@ -142,7 +142,7 @@ try:
     # ===========================================================
     
     pipe = SurrogatePipe(
-        model=gp_fitted,
+        surrogate=gp_fitted,
         varSet=vset,
         X=X_train,
         y=y_train,
@@ -223,8 +223,11 @@ try:
         opt_config=opt_config
     )
     
+    # Wrap in SurrogateGPax
+    surrogate2 = SurrogateGPax(model=gp2_fitted, opt_config=opt_config)
+
     pipe2 = SurrogatePipe(
-        model=gp2_fitted,
+        surrogate=surrogate2,
         X=X_train,
         y=y_train,
         x_scaler=x_scaler,

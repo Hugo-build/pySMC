@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 from pprint import pprint
 
-from core.Surrogates import SurrogatePipe, to_numpy
+from core.Surrogates import SurrogatePipe, to_numpy, SurrogateGPax
 from core.GPax import GaussianProcess, RBF, Matern52, optSetup
 from core.DoEs import sobol_g
 from core.Variables import VariableSet, Variable
@@ -137,8 +137,11 @@ def main():
     print("3. Creating SurrogatePipe (no scalers)")
     print("="*70)
     
+    # Wrap GP in adapter
+    surrogate = SurrogateGPax(model=gp_fitted, opt_config=opt_config)
+
     pipe = SurrogatePipe(
-        model=gp_fitted,
+        surrogate=surrogate,
         varSet=vset,
         X=X_train,
         y=y_train
@@ -146,7 +149,7 @@ def main():
     
     print(f"   ✓ SurrogatePipe created")
     print(f"   ✓ Scaling enabled: X={pipe._scaled4X}, y={pipe._scaled4y}")
-    print(f"   ✓ Model type: {type(pipe.model).__name__}")
+    print(f"   ✓ Model type: {type(pipe.surrogate).__name__}")
     print(f"   ✓ Training data: {pipe.X.shape[0]} samples, {pipe.X.shape[1]} dimensions")
     
     # -------------------------------------------------------

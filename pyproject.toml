@@ -26,6 +26,7 @@ dependencies = [
   "pillow>=10.0.0",
   "salib>=1.5.2",
   "ipykernel>=7.1.0",
+  "xgboost>=3.1.2",
 ]
 
 [project.optional-dependencies]

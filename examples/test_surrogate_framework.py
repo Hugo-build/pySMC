@@ -26,7 +26,8 @@ from core.Surrogates import (
     StandardScaler,
     calc_upd_weight,
     combine_weighted_data,
-    to_numpy
+    to_numpy,
+    SurrogateGPax
 )
 from core.Weighted import SizeNoveltyWeight
 from core.GPax import GaussianProcess, RBF, Matern52, optSetup
@@ -115,12 +116,15 @@ def main():
     opt_config = optSetup(optimizer='adam', steps=500, lr=0.02, verbose=True, log_every=100)
     gp_fitted = gp.fit(jnp.array(X_train_scaled), jnp.array(y_train_scaled), opt_config=opt_config)
     
+    # Wrap in SurrogateGPax
+    surrogate = SurrogateGPax(model=gp_fitted, opt_config=opt_config)
+
     # Create surrogate pipe with:
     # - model trained on scaled data
     # - already-fitted scalers (will NOT be re-fitted)
     # - original unscaled X and y for reference
     pipe = SurrogatePipe(
-        model=gp_fitted,
+        surrogate=surrogate,
         varSet=vset,
         X=X_train,  # Original unscaled data
         y=y_train,  # Original unscaled data
@@ -130,7 +134,7 @@ def main():
     )
     
     print(f"   ✓ Surrogate pipe created with X scaler: {pipe._scaled4X}, y scaler: {pipe._scaled4y}")
-    print(f"   ✓ Surrogate pipe model: {type(pipe.model).__name__}")
+    print(f"   ✓ Surrogate pipe model: {type(pipe.surrogate).__name__}")
     print(f"   ✓ Surrogate pipe variables: {pipe.varSet.to_SAlib()}")
     
 
@@ -219,10 +223,11 @@ def main():
     gp_upd = GaussianProcess.from_params(kernel=kernel, noise_std=0.1, jitter=1e-6)
     gp_upd_fitted = gp_upd.fit(jnp.array(X_combined_scaled), jnp.array(y_combined_scaled), opt_config=opt_config)
     
-    
+    # Wrap in SurrogateGPax
+    surrogate_upd = SurrogateGPax(model=gp_upd_fitted, opt_config=opt_config)
 
     pipe_upd = SurrogatePipe(
-        model=gp_upd_fitted,
+        surrogate=surrogate_upd,
         varSet=vset,
         X=X_combined,
         y=y_combined,
@@ -233,8 +238,8 @@ def main():
 
     pool = SurrogatePool(surrogates=[pipe, pipe_upd])
     print(f"   ✓ SurrogatePool created with {len(pool.surrogates)} surrogates")
-    print(f"   ✓ Surrogate 0: {type(pool.get(0).model.kernel).__name__}")
-    print(f"   ✓ Surrogate 1: {type(pool.get(1).model.kernel).__name__}")
+    print(f"   ✓ Surrogate 0: {type(pool.get(0).surrogate.model.kernel).__name__}")
+    print(f"   ✓ Surrogate 1: {type(pool.get(1).surrogate.model.kernel).__name__}")
     
 
     

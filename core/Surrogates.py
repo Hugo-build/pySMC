@@ -6,6 +6,7 @@ from typing import Protocol, Dict, List, Any, Tuple, Optional, Union, Callable, 
 from enum import Enum
 import json
 import sys
+import os
 from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
@@ -23,11 +24,8 @@ except ImportError:
     TORCH_AVAILABLE = False
     torch = None  # type: ignore
 
-try:
-    from sklearn.gaussian_process import GaussianProcessRegressor
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
+
+
 ################################################################################
 
 
@@ -58,7 +56,7 @@ ASCII overview (pipe emits surrogate "balls" into a pool):
                          model.predict(...)    <------------'   /   /   /
                                                                /   /   /
     Backends (examples):                                      /   /   /
-       - sklearn.GPRegressor --------------------------------'   /   /
+       - sklearn GPRegressor --------------------------------'   /   /
        - JAX GP (GPax.GaussianProcess) -------------------------'   /
        - Future NN/other models -----------------------------------'
 ___________________________________________________________________________________________________________
@@ -302,7 +300,7 @@ def combine_weighted_data(
 
 
 # =======================================================
-# i.a) Scaler Protocol
+# i) Scaler Protocol
 # =======================================================
 
 @dataclass 
@@ -416,8 +414,184 @@ class StandardScaler:
 
 
 # =======================================================
-# i.b) Base Surrogate Protocol
+# ii) Base Surrogate Protocol
 # =======================================================
+
+
+class BaseSurrogate(ABC):
+    """
+    The Universal Surrogate Interface.
+    Enforces:
+    1. Unified fit/predict interface
+    2. Strict Return Type (Tuple[Array, Array])
+    3. Multi-Mode Saving: 'native' (binary) vs 'params' (JSON)
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.is_fitted = False
+        self.supports_std = False
+
+    @abstractmethod
+    def fit(self, X:Array, y:Array) -> None:
+        """
+        Fit/train the surrogate model to the data.
+        """
+        pass
+
+    @abstractmethod
+    def predict(self, X:Array) -> Tuple[Array, Array]:
+        """
+        MUST return tuple: (y1, y2, ...)
+        If model is deterministic: (mean, std) = (y1, [0.0])
+        """
+        pass
+
+    # ---- Public Save/Load Interface ----
+    def save(self, path, mode='native'):
+        """
+        mode='native': Uses pickle/joblib (Fast, Python-specific).
+        mode='params': Uses pure JSON text (Portable, Safe).
+        """
+        os.makedirs(path, exist_ok=True)
+        
+        meta = {
+            "name": self.name,
+            "class": self.__class__.__name__,
+            "mode": mode,
+            "fitted": self.is_fitted,
+            }
+
+        with open(os.path.join(path, f"{self.name}_meta.json"), "w") as f:
+            json.dump(meta, f, indent=4)
+
+        if mode == 'native':
+            self._save_native_impl(path)
+        elif mode == 'params':
+            if not self.is_fitted:
+                print(f"[{self.name}] Warning: Saving params of unfitted model.")
+            
+            state = self._get_state_dict()
+            # Wrap state in a dictionary
+            dump_data = {"state_dict": state}
+            with open(os.path.join(path, f"{self.name}_params.json"), 'w') as f:
+                json.dump(dump_data, f, indent=4)
+        
+    def load(self, path):
+        """Auto-detects mode from metadata."""
+        meta_path = os.path.join(path, f"{self.name}_meta.json")
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+            
+        self.is_fitted = meta['fitted']
+        mode = meta['mode']
+
+        if mode == 'native':
+            self._load_native_impl(path)
+        elif mode == 'params':
+            p_path = os.path.join(path, f"{self.name}_params.json")
+            with open(p_path, 'r') as f:
+                dump_data = json.load(f)
+            self._set_state_dict(dump_data["state_dict"])
+        
+
+    # --- Abstract Implementation Hooks ---
+    @abstractmethod
+    def _save_native_impl(self, path): pass
+    @abstractmethod
+    def _load_native_impl(self, path): pass
+    
+    # Optional hooks (can leave empty if model doesn't support params save)
+    def _get_state_dict(self) -> dict: return {}
+    def _set_state_dict(self, state: dict): pass
+
+class DummySurrogate(BaseSurrogate):
+    """
+    A dummy surrogate that can wrap a custom prediction function.
+    Useful for testing, deterministic transformations, or placeholders.
+    """
+    def __init__(self, name="Dummy", predict_fn: Optional[Callable[[Array], Any]] = None):
+        super().__init__(name)
+        self.supports_std = False
+        self.predict_fn = predict_fn
+
+    def fit(self, X, y):
+        print("Dummy surrogate model cannot be fitted, it is an adapter for any prediction function.")
+
+    def predict(self, X):
+        if self.predict_fn is not None:
+            return self.predict_fn(X)
+        return X
+
+    def _save_native_impl(self, path): pass
+    def _load_native_impl(self, path): pass
+    def _get_state_dict(self): return {}
+    def _set_state_dict(self, s): pass
+
+
+class SurrogateGPax(BaseSurrogate):
+    """
+    Adapter for GPax GaussianProcess to fit into the BaseSurrogate interface.
+    """
+    def __init__(self, name: str = "SurrogateGPax", model: Optional[Any] = None, opt_config: Optional[Any] = None):
+        super().__init__(name)
+        self.model = model
+        self.opt_config = opt_config
+        self.supports_std = True
+        
+        # Check if model is already fitted
+        if self.model is not None:
+             # GPax model has X attribute when fitted
+             if getattr(self.model, 'X', None) is not None:
+                  self.is_fitted = True
+
+    def fit(self, X: Array, y: Array) -> None:
+        if self.model is None:
+             raise ValueError("GPax model is not initialized. Please provide a model instance.")
+             
+        X_jax = to_jax(X)
+        y_jax = to_jax(y)
+        
+        # GPax.fit returns a NEW instance
+        self.model = self.model.fit(X_jax, y_jax, opt_config=self.opt_config)
+        self.is_fitted = True
+
+    def predict(self, X: Array) -> Tuple[Array, Array]:
+        if not self.is_fitted or self.model is None:
+             # Double check if model has data (deserialization case)
+             if self.model is not None and getattr(self.model, 'X', None) is not None:
+                  self.is_fitted = True
+             else:
+                  raise ValueError(f"Model {self.name} is not fitted.")
+        
+        X_jax = to_jax(X)
+        mean, std = self.model.predict(X_jax)
+        return to_numpy(mean), to_numpy(std)
+
+    def _save_native_impl(self, path: str) -> None:
+        # Save the inner GPax model to a file inside the path directory
+        if self.model is not None:
+            # path is a directory created by BaseSurrogate.save
+            model_path = os.path.join(path, "gpax_model.json")
+            if hasattr(self.model, 'save'):
+                self.model.save(model_path, include_data=True, opt_config=self.opt_config)
+
+    def _load_native_impl(self, path: str) -> None:
+        # Load the inner GPax model
+        from .GPax import GaussianProcess
+        model_path = os.path.join(path, "gpax_model.json")
+        if os.path.exists(model_path):
+             self.model, self.opt_config = GaussianProcess.load(model_path)
+             if getattr(self.model, 'X', None) is not None:
+                  self.is_fitted = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Support for direct JSON serialization within SurrogatePipe."""
+        if self.model is not None and hasattr(self.model, 'to_dict'):
+             d = self.model.to_dict(include_data=True, opt_config=self.opt_config)
+             d['__surrogate_type__'] = 'SurrogateGPax'
+             return d
+        return {}
 
 
 @dataclass
@@ -425,7 +599,7 @@ class SurrogatePipe:
     """
     Surrogate model pipeline.
     """
-    model: object
+    surrogate: BaseSurrogate
     varSet: Optional[VariableSet] = None
     
     X: Optional[Array] = None
@@ -453,14 +627,17 @@ class SurrogatePipe:
         Note: Only fits scalers if they haven't been fitted yet. If you pass in
         already-fitted scalers, they will be used as-is.
         """
+        if isinstance(self.surrogate, BaseSurrogate):
+             self._fitted = self.surrogate.is_fitted
+
         # Check if x_scaler is already fitted (has mean_ attribute)
         if self.x_scaler is not None:
             if getattr(self.x_scaler, 'mean_', None) is not None:
                 # Scaler already fitted, just mark as scaled
                 self._scaled4X = True
-            elif hasattr(self.model, 'X') and getattr(self.model, 'X') is not None:
-                # Scaler not fitted, fit it on model's training data
-                self.x_scaler.fit(to_numpy(self.model.X))
+            elif hasattr(self.surrogate, 'X') and getattr(self.surrogate, 'X') is not None:
+                # Scaler not fitted, fit it on surrogate's training data
+                self.x_scaler.fit(to_numpy(self.surrogate.X))
                 self._scaled4X = True
         
         # Check if y_scaler is already fitted (has mean_ attribute)
@@ -468,16 +645,18 @@ class SurrogatePipe:
             if getattr(self.y_scaler, 'mean_', None) is not None:
                 # Scaler already fitted, just mark as scaled
                 self._scaled4y = True
-            elif hasattr(self.model, 'y') and getattr(self.model, 'y') is not None:
-                # Scaler not fitted, fit it on model's training data
-                self.y_scaler.fit(to_numpy(self.model.y))
+            elif hasattr(self.surrogate, 'y') and getattr(self.surrogate, 'y') is not None:
+                # Scaler not fitted, fit it on surrogate's training data
+                self.y_scaler.fit(to_numpy(self.surrogate.y))
                 self._scaled4y = True
 
     # ------------------------------------------------------------
     # Configuration helpers for non initialized surrogate pipe
     # ------------------------------------------------------------
-    def attach_model(self, model: object) -> None:
-        self.model = model
+    def attach_surrogate(self, surrogate: object) -> None:
+        self.surrogate = surrogate
+        if isinstance(surrogate, BaseSurrogate):
+            self._fitted = surrogate.is_fitted
 
     def set_scalers(self, x_scaler: Optional[Scaler] = None, y_scaler: Optional[Scaler] = None) -> None:
         self.x_scaler = x_scaler
@@ -492,7 +671,68 @@ class SurrogatePipe:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
         return X_train, X_test, y_train, y_test
 
-    
+    def fit(self, X: Array, y: Array) -> None:
+        """
+        Fit the surrogate model.
+        
+        If surrogate is a BaseSurrogate, delegates to surrogate.fit().
+        """
+        self.validate_X(X)
+        self.validate_y(y)
+        
+        # 1. Fit scalers if they exist and are not yet fitted
+        if self.x_scaler is not None and not self._scaled4X:
+            self.x_scaler.fit(to_numpy(X))
+            self._scaled4X = True
+            
+        if self.y_scaler is not None and not self._scaled4y:
+            self.y_scaler.fit(to_numpy(y))
+            self._scaled4y = True
+            
+        # 2. Transform data
+        X_train = self.transform_X(X)
+        
+        y_train = y
+        if self.y_scaler is not None and self._scaled4y:
+            y_np = to_numpy(y)
+            if y_np.ndim == 1:
+                y_np = y_np.reshape(-1, 1)
+            y_train = self.y_scaler.transform(y_np).flatten()
+            
+        # 3. Delegate fit to surrogate if it supports it
+        if isinstance(self.surrogate, BaseSurrogate):
+            self.surrogate.fit(X_train, y_train)
+            self._fitted = self.surrogate.is_fitted
+        else:
+            # Fallback for models that don't inherit BaseSurrogate but might have fit
+            # Note: For immutable models like GPax, this won't update the surrogate reference!
+            # The user is responsible for fitting those beforehand or using BaseSurrogate wrappers.
+            if hasattr(self.surrogate, 'fit'):
+                # Try to fit, but warn about return value/immutability issues
+                res = self.surrogate.fit(X_train, y_train)
+                if res is not None and not isinstance(res, type(None)):
+                     # e.g. GPax returns new instance
+                     self.surrogate = res
+                     self._fitted = True
+                elif hasattr(self.surrogate, 'is_fitted'): # Sklearn style
+                     self._fitted = getattr(self.surrogate, 'is_fitted', True) # some sklearn models don't have is_fitted attr directly
+                else:
+                     self._fitted = True
+        
+        # 4. Store data
+        self.X = X
+        self.y = y
+        self.X_train = X 
+        self.y_train = y
+        self._fitted = True
+
+
+    def refit(self, X: Array, y: Array) -> None:
+        """
+        Retrain the surrogate model.
+        """
+        self.fit(X, y)
+
     
     # -----------------------
     # Validation utilities
@@ -544,8 +784,8 @@ class SurrogatePipe:
 
     def predict(self, X:Array, return_std:bool = False) -> Union[Array, Tuple[Array, Array]]:
         """
-        Convenience wrapper that applies X-scaling before calling the model and
-        y inverse-scaling after. Does not own training; relies on model's predict.
+        Convenience wrapper that applies X-scaling before calling the surrogate and
+        y inverse-scaling after. Does not own training; relies on surrogate's predict.
         
         Note: This method tries to handle different model backends:
         - GPax models: Always return (mean, std) tuple
@@ -553,23 +793,27 @@ class SurrogatePipe:
         """
         X_in = self.transform_X(X)
         
-        # Try to detect the model type and call predict appropriately
-        try:
-            # Try sklearn-style predict with return_std parameter
-            if return_std:
-                out = self.model.predict(X_in, return_std=True)
-                mean, std = out
-            else:
-                mean = self.model.predict(X_in, return_std=False)
-                std = None
-        except TypeError:
-            # Fall back to GPax-style (always returns tuple)
-            out = self.model.predict(X_in)
-            if isinstance(out, tuple) and len(out) == 2:
-                mean, std = out
-            else:
-                mean = out
-                std = None
+        # Priority: BaseSurrogate interface
+        if isinstance(self.surrogate, BaseSurrogate):
+            mean, std = self.surrogate.predict(X_in)
+        else:
+            # Fallback/Legacy logic
+            try:
+                # Try sklearn-style predict with return_std parameter
+                if return_std:
+                    out = self.surrogate.predict(X_in, return_std=True)
+                    mean, std = out
+                else:
+                    mean = self.surrogate.predict(X_in, return_std=False)
+                    std = None
+            except TypeError:
+                # Fall back to GPax-style (always returns tuple)
+                out = self.surrogate.predict(X_in)
+                if isinstance(out, tuple) and len(out) == 2:
+                    mean, std = out
+                else:
+                    mean = out
+                    std = None
         
         mean_pp, std_pp = self.postprocess_prediction(mean, std)
         return (mean_pp, std_pp) if return_std else mean_pp
@@ -580,11 +824,13 @@ class SurrogatePipe:
     
     def _detect_model_type(self) -> str:
         """Detect the model backend type for serialization."""
-        model_class = self.model.__class__.__name__
-        model_module = self.model.__class__.__module__
+        if self.surrogate is None:
+            return 'none'
+        model_class = self.surrogate.__class__.__name__
+        model_module = self.surrogate.__class__.__module__
         
         # Check for GPax models
-        if 'GPax' in model_module or model_class == 'GaussianProcess':
+        if 'GPax' in model_module or model_class == 'GaussianProcess' or model_class == 'SurrogateGPax':
             return 'gpax'
         # Check for sklearn models
         elif 'sklearn' in model_module:
@@ -628,11 +874,11 @@ class SurrogatePipe:
         }
         
         # Include model if it has to_dict method
-        if hasattr(self.model, 'to_dict'):
-            result['model'] = self.model.to_dict()
+        if hasattr(self.surrogate, 'to_dict'):
+            result['model'] = self.surrogate.to_dict()
         else:
             result['model'] = None
-            result['_model_warning'] = f"Model type '{type(self.model).__name__}' does not support JSON serialization"
+            result['_model_warning'] = f"Model type '{type(self.surrogate).__name__}' does not support JSON serialization"
         
         # Include data arrays
         if include_data:
@@ -692,7 +938,7 @@ class SurrogatePipe:
         manifest = {
             'version': '1.0',
             'model_type': self._detect_model_type(),
-            'has_model': hasattr(self.model, 'to_dict'),
+            'has_model': hasattr(self.surrogate, 'to_dict'),
             'has_x_scaler': self.x_scaler is not None,
             'has_y_scaler': self.y_scaler is not None,
             'has_data': include_data,
@@ -705,11 +951,19 @@ class SurrogatePipe:
             json.dump(manifest, f, indent=2)
         
         # Save model if it supports serialization
-        if hasattr(self.model, 'save'):
-            self.model.save(dirpath / 'model.json')
-        elif hasattr(self.model, 'to_dict'):
+        if hasattr(self.surrogate, 'save'):
+             # BaseSurrogate.save creates a directory, so we pass the directory path
+             # If it's a BaseSurrogate (like SurrogateGPax), it expects a directory path
+             if isinstance(self.surrogate, BaseSurrogate):
+                  self.surrogate.save(str(dirpath / 'model'))
+             else:
+                  # Legacy behavior for models that might save as a file
+                  # But wait, GPax.GaussianProcess.save saves as a file!
+                  # We need to distinguish based on type or signature
+                  self.surrogate.save(dirpath / 'model.json')
+        elif hasattr(self.surrogate, 'to_dict'):
             with open(dirpath / 'model.json', 'w') as f:
-                json.dump(self.model.to_dict(), f, indent=2)
+                json.dump(self.surrogate.to_dict(), f, indent=2)
         
         # Save scalers
         if self.x_scaler is not None and hasattr(self.x_scaler, 'save'):
@@ -769,13 +1023,24 @@ class SurrogatePipe:
         loaded_model = model
         if loaded_model is None and data.get('model') is not None:
             model_type = data.get('model_type', 'unknown')
+            model_data = data['model']
+            
             if model_type == 'gpax':
-                # Import GPax and reconstruct
-                try:
-                    from .GPax import GaussianProcess
-                    loaded_model, _ = GaussianProcess.from_dict(data['model'])
-                except ImportError:
-                    raise ValueError("Cannot load GPax model - GPax module not available")
+                # Check for SurrogateGPax wrapper first
+                if isinstance(model_data, dict) and model_data.get('__surrogate_type__') == 'SurrogateGPax':
+                     try:
+                        from .GPax import GaussianProcess
+                        inner_model, opt_conf = GaussianProcess.from_dict(model_data)
+                        loaded_model = SurrogateGPax(model=inner_model, opt_config=opt_conf)
+                     except ImportError:
+                        raise ValueError("Cannot load SurrogateGPax - GPax module not available")
+                else:
+                    # Import GPax and reconstruct
+                    try:
+                        from .GPax import GaussianProcess
+                        loaded_model, _ = GaussianProcess.from_dict(data['model'])
+                    except ImportError:
+                        raise ValueError("Cannot load GPax model - GPax module not available")
         
         if loaded_model is None:
             raise ValueError(
@@ -793,7 +1058,7 @@ class SurrogatePipe:
         
         # Create pipe without triggering __post_init__ scaler fitting
         pipe = cls.__new__(cls)
-        pipe.model = loaded_model
+        pipe.surrogate = loaded_model
         pipe.varSet = None
         pipe.X = X
         pipe.y = y
@@ -864,15 +1129,39 @@ class SurrogatePipe:
         # Load model
         loaded_model = model
         if loaded_model is None and manifest.get('has_model'):
-            model_path = dirpath / 'model.json'
-            if model_path.exists():
-                model_type = manifest.get('model_type', 'unknown')
+            # Check for BaseSurrogate directory-style model
+            model_dir = dirpath / 'model'
+            model_file = dirpath / 'model.json'
+            
+            model_type = manifest.get('model_type', 'unknown')
+            
+            if model_dir.exists() and model_dir.is_dir():
+                 # Load BaseSurrogate-style model (folder)
+                 if model_type == 'gpax':
+                      # Load SurrogateGPax
+                      # We need to peek inside to see if it's actually a SurrogateGPax structure
+                      # or if we should treat it otherwise
+                      from .GPax import GaussianProcess
+                      # SurrogateGPax puts gpax_model.json inside the folder
+                      if (model_dir / 'gpax_model.json').exists():
+                           inner_model, opt_conf = GaussianProcess.load(model_dir / 'gpax_model.json')
+                           loaded_model = SurrogateGPax(model=inner_model, opt_config=opt_conf)
+                      else:
+                           # Fallback or other BaseSurrogate type
+                           # For now, we only have SurrogateGPax as a concrete BaseSurrogate wrapper for GPax
+                           pass
+            elif model_file.exists():
                 if model_type == 'gpax':
+                    # Legacy or direct GPax load
                     from .GPax import GaussianProcess
-                    loaded_model, _ = GaussianProcess.load(model_path)
+                    if model_file.is_dir(): 
+                         # This case shouldn't happen with the fix above, but just in case
+                         pass 
+                    else:
+                         loaded_model, _ = GaussianProcess.load(model_file)
                 else:
                     # Try to load as generic dict
-                    with open(model_path, 'r') as f:
+                    with open(model_file, 'r') as f:
                         model_data = json.load(f)
                     # User must provide model
                     if model is None:
@@ -910,7 +1199,7 @@ class SurrogatePipe:
         
         # Create pipe
         pipe = cls.__new__(cls)
-        pipe.model = loaded_model
+        pipe.surrogate = loaded_model
         pipe.varSet = None
         pipe.X = X
         pipe.y = y
@@ -934,35 +1223,37 @@ class SurrogatePipe:
     def make_predict_fn(self, model: Optional[object] = None) -> Callable[[Array], Tuple[Array, Array]]:
         """
         Create a callable that maps X -> (mean, std) using this pipe's
-        transform/postprocess with the given model (default: self.model).
+        transform/postprocess with the given model (default: self.surrogate).
         
         Returns a function that always returns (mean, std) tuple for consistency
         with adaptive learning utilities.
         """
-        mdl = model if model is not None else self.model
+        mdl = model if model is not None else self.surrogate
         def _predict_fn(X: Array) -> Tuple[Array, Array]:
             X_in = self.transform_X(X)
             
-            # Try to detect the model type and call predict appropriately
-            try:
-                # Try sklearn-style predict with return_std parameter
-                out = mdl.predict(X_in, return_std=True)
-                mean, std = out
-            except TypeError:
-                # Fall back to GPax-style (always returns tuple)
-                out = mdl.predict(X_in)
-                if isinstance(out, tuple) and len(out) == 2:
+            if isinstance(mdl, BaseSurrogate):
+                mean, std = mdl.predict(X_in)
+            else:
+                # Try to detect the model type and call predict appropriately
+                try:
+                    # Try sklearn-style predict with return_std parameter
+                    out = mdl.predict(X_in, return_std=True)
                     mean, std = out
-                else:
-                    # Model returns only mean, create dummy std
-                    mean = out
-                    std = jnp.zeros_like(mean)
+                except TypeError:
+                    # Fall back to GPax-style (always returns tuple)
+                    out = mdl.predict(X_in)
+                    if isinstance(out, tuple) and len(out) == 2:
+                        mean, std = out
+                    else:
+                        # Model returns only mean, create dummy std
+                        mean = out
+                        std = jnp.zeros_like(mean)
             
             return self.postprocess_prediction(mean, std)
         return _predict_fn
+ 
    
-
-
 class SurrogatePool:
     """
     Pool of surrogate model pipelines.
@@ -1114,5 +1405,4 @@ class SurrogatePool:
             'num_surrogates': len(self.surrogates),
             'pipes': summaries
         }
-
 
